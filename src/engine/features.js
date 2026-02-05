@@ -1,6 +1,12 @@
 import { distMeters } from "./distance.js";
 import { samplePersonalDelayMinutes } from "./profiles.js";
 
+function sum(values) {
+  let total = 0;
+  for (const value of values) total += value;
+  return total;
+}
+
 export function computeFeatures({ dayIndex, matrix, strategy, profile, scenarioId, distNormDiv = 600 }) {
   const blocks = strategy.blocks;
   const totalPlannedMin = sum(blocks.map(b => (b.endIdx - b.startIdx) * 15));
@@ -82,4 +88,3 @@ function hhmmToMin(hhmm) {
   const [h, m] = hhmm.split(":").map(Number);
   return h * 60 + m;
 }
-
