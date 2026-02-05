@@ -173,13 +173,20 @@ export async function buildDatasetFromRepository() {
   const dataset = {
     rooms: null,
     days: {},
-    meta: { source: "repo_public_data", createdAtISO: new Date().toISOString(), dayCount: 0 }
+    meta: {
+      source: "repo_public_data",
+      createdAtISO: new Date().toISOString(),
+      dayCount: 0,
+      filesAttempted: dayFiles.length,
+      filesSkipped: 0
+    }
   };
 
   for (const fileName of dayFiles) {
     const day = parseDayFromFilename(fileName);
     if (!day) {
-      console.warn(`Überspringe ungültigen Dateinamen: ${fileName}`);
+      console.error(`[dataset][public] Ungültiger Dateiname: ${fileName}`);
+      dataset.meta.filesSkipped += 1;
       continue;
     }
 
@@ -188,17 +195,104 @@ export async function buildDatasetFromRepository() {
       const { dayObj, rooms } = extractDayData(json, day);
 
       if (!dayObj) {
-        console.warn(`Überspringe ${fileName}: keine kompatiblen Slotdaten gefunden.`);
+        console.error(`[dataset][public] Überspringe ${fileName}: keine kompatiblen Slotdaten gefunden.`);
+        dataset.meta.filesSkipped += 1;
         continue;
       }
 
       dataset.days[day] = dayObj;
       if (!dataset.rooms && rooms) dataset.rooms = rooms;
+      console.log(`[dataset][public] geladen: ${fileName}`);
     } catch (e) {
-      console.warn(`Fehler beim Laden von ${fileName}:`, e);
+      console.error(`[dataset][public] Fehler beim Laden von ${fileName}:`, e);
+      dataset.meta.filesSkipped += 1;
     }
   }
 
   finalizeDataset(dataset);
   return { dataset, matrix };
+}
+
+
+function normalizeModuleJson(mod) {
+  if (mod && typeof mod === "object" && "default" in mod) return mod.default;
+  return mod;
+}
+
+export async function buildDatasetFromSourceFolder() {
+  const indexModules = import.meta.glob("../data/dataset-index.json", { eager: true });
+  const matrixModules = import.meta.glob("../data/roomDistanceMatrix.json", { eager: true });
+  const dayModules = import.meta.glob("../data/*_ml.json", { eager: true });
+
+  const indexPath = Object.keys(indexModules)[0];
+  const matrixPath = Object.keys(matrixModules)[0];
+
+  if (!indexPath || !matrixPath || Object.keys(dayModules).length === 0) {
+    throw new Error("Keine eingebetteten Quelldaten unter src/data gefunden");
+  }
+
+  const index = normalizeModuleJson(indexModules[indexPath]);
+  const matrix = normalizeModuleJson(matrixModules[matrixPath]);
+  const dayFiles = Array.isArray(index?.dayFiles) ? index.dayFiles : [];
+
+  if (!dayFiles.length) throw new Error("Keine dayFiles in src/data/dataset-index.json gefunden");
+
+  const dataset = {
+    rooms: null,
+    days: {},
+    meta: {
+      source: "src_data_bundle",
+      createdAtISO: new Date().toISOString(),
+      dayCount: 0,
+      filesAttempted: dayFiles.length,
+      filesSkipped: 0
+    }
+  };
+
+  for (const fileName of dayFiles) {
+    const day = parseDayFromFilename(fileName);
+    if (!day) {
+      console.error(`[dataset][src] Ungültiger Dateiname: ${fileName}`);
+      dataset.meta.filesSkipped += 1;
+      continue;
+    }
+
+    const moduleKey = `../data/${fileName}`;
+    const mod = dayModules[moduleKey];
+
+    if (!mod) {
+      console.error(`[dataset][src] Datei fehlt: ${fileName}`);
+      dataset.meta.filesSkipped += 1;
+      continue;
+    }
+
+    try {
+      const json = normalizeModuleJson(mod);
+      const { dayObj, rooms } = extractDayData(json, day);
+      if (!dayObj) {
+        console.error(`[dataset][src] Überspringe ${fileName}: keine kompatiblen Slotdaten gefunden.`);
+        dataset.meta.filesSkipped += 1;
+        continue;
+      }
+
+      dataset.days[day] = dayObj;
+      if (!dataset.rooms && rooms) dataset.rooms = rooms;
+      console.log(`[dataset][src] geladen: ${fileName}`);
+    } catch (error) {
+      console.error(`[dataset][src] Fehler in ${fileName}:`, error);
+      dataset.meta.filesSkipped += 1;
+    }
+  }
+
+  finalizeDataset(dataset);
+  return { dataset, matrix };
+}
+
+export async function buildDatasetFromStartup() {
+  try {
+    return await buildDatasetFromSourceFolder();
+  } catch (sourceError) {
+    console.log("[dataset] Fallback auf public/data", sourceError?.message || sourceError);
+    return buildDatasetFromRepository();
+  }
 }

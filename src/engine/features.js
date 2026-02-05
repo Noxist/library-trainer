@@ -7,16 +7,20 @@ function sum(values) {
   return total;
 }
 
+function clamp01(x) {
+  return Math.max(0, Math.min(1, x));
+}
+
 export function computeFeatures({ dayIndex, matrix, strategy, profile, scenarioId, distNormDiv = 600 }) {
   const blocks = strategy.blocks;
-  const totalPlannedMin = sum(blocks.map(b => (b.endIdx - b.startIdx) * 15));
-  const totalCoveredMin = totalPlannedMin; // "covered" hier gleich planned; später kannst du Risiko/Verlust abziehen
+  const totalPlannedMin = sum(blocks.map((b) => (b.endIdx - b.startIdx) * 15));
+  const totalCoveredMin = totalPlannedMin;
 
-  // Distance + switches + wait + stability + risk
-  let distSum = 0;
+  let walkMeters = 0;
   let switches = 0;
+  let waitMinutesTotal = 0;
+
   let waitPenalty = 0;
-  let stabilityPenalty = 0;
   let productiveLossMin = 0;
   let riskLateMin = 0;
 
@@ -25,41 +29,57 @@ export function computeFeatures({ dayIndex, matrix, strategy, profile, scenarioI
   const checkinStressFrom = profile.riskTolerance.lateCheckinBrutalFromMin;
   const switchLossMin = profile.switchAnnoyance.switchLossMin;
 
-  // Stability: kurze Blocks bestrafen
+  const uniqueRooms = new Set(blocks.map((b) => b.room)).size;
+
+  let shortBlockPenalty = 0;
   for (const b of blocks) {
     const lenMin = (b.endIdx - b.startIdx) * 15;
-    if (lenMin < 90) stabilityPenalty += (90 - lenMin) / 90; // soft
+    shortBlockPenalty += clamp01((90 - lenMin) / 90);
   }
+  shortBlockPenalty = blocks.length ? shortBlockPenalty / blocks.length : 0;
+
+  const stabilityScore = clamp01((uniqueRooms > 0 ? 1 / uniqueRooms : 0) * (1 - 0.6 * shortBlockPenalty));
+  const stabilityPenalty = blocks.length ? sum(blocks.map((b) => {
+    const lenMin = (b.endIdx - b.startIdx) * 15;
+    return lenMin < 90 ? (90 - lenMin) / 90 : 0;
+  })) : 0;
 
   for (let i = 0; i < blocks.length - 1; i++) {
     const a = blocks[i];
     const b = blocks[i + 1];
+
     if (a.room !== b.room) {
-      switches++;
-      distSum += distMeters(matrix, a.room, b.room);
+      switches += 1;
+      walkMeters += distMeters(matrix, a.room, b.room);
       productiveLossMin += switchLossMin;
     }
+
     const gapMin = (b.startIdx - a.endIdx) * 15;
-    if (gapMin > 0) waitPenalty += gapPenaltyNonlinear(gapMin, shortBrutal, longOk);
+    if (gapMin > 0) {
+      waitMinutesTotal += gapMin;
+      waitPenalty += gapPenaltyNonlinear(gapMin, shortBrutal, longOk);
+    }
   }
 
-  // Check-in Risiko pro Block (Ankunft)
-  // planned arrival = block.startTime, plus personal delay (zeitbucket)
   for (const b of blocks) {
     const delay = samplePersonalDelayMinutes(profile, scenarioId, b.startTime);
     const arrivalMin = hhmmToMin(b.startTime) + delay;
     const deadlineMin = hhmmToMin(b.startTime) + 15;
     const lateBy = arrivalMin - deadlineMin;
     if (lateBy > 0) {
-      // risk steigt stärker, wenn knapp vor deadline schon Stress
       riskLateMin += lateBy + Math.max(0, checkinStressFrom - (15 - delay)) * 0.5;
     }
   }
 
-  const distanceNorm = distSum / distNormDiv; // später: P95-Normalizer, hier brauchbarer Default
-  const switchPenalty = switches * switches; // nichtlinear
+  const distanceNorm = walkMeters / distNormDiv;
+  const switchPenalty = switches * switches;
 
   return {
+    walkMeters,
+    waitMinutesTotal,
+    switches,
+    uniqueRooms,
+    stabilityScore,
     distanceNorm,
     waitPenalty,
     switchPenalty,
@@ -71,16 +91,14 @@ export function computeFeatures({ dayIndex, matrix, strategy, profile, scenarioI
   };
 }
 
-// Kurze Lücken brutal, lange flacher
 function gapPenaltyNonlinear(gMin, shortBrutalFrom, longOkFrom) {
-  // piecewise, glatt genug, keine harte Kante
   const a = Math.min(gMin, shortBrutalFrom);
   const b = Math.max(0, Math.min(gMin, longOkFrom) - shortBrutalFrom);
   const c = Math.max(0, gMin - longOkFrom);
 
-  const p1 = (a / Math.max(1, shortBrutalFrom)) ** 1.7 * 2.5; // brutal
-  const p2 = (b / Math.max(1, (longOkFrom - shortBrutalFrom))) * 1.0; // mittel
-  const p3 = Math.log1p(c / 30) * 0.4; // flach
+  const p1 = (a / Math.max(1, shortBrutalFrom)) ** 1.7 * 2.5;
+  const p2 = (b / Math.max(1, (longOkFrom - shortBrutalFrom))) * 1.0;
+  const p3 = Math.log1p(c / 30) * 0.4;
   return p1 + p2 + p3;
 }
 
