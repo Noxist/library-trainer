@@ -15,6 +15,10 @@ import SessionProgress from "./ui/SessionProgress.jsx";
 import TrainingMixBar from "./ui/TrainingMixBar.jsx";
 import OnboardingModal from "./ui/OnboardingModal.jsx";
 import ProfileAnalyzer from "./ui/ProfileAnalyzer.jsx";
+
+// --- NEU: Import der Advanced Page ---
+import AdvancedAnalysisPage from "./ui/AdvancedAnalysisPage.jsx";
+
 const FIXED_MODE = "LOCKER";
 const FIXED_ACCOUNTS = 3;
 
@@ -32,6 +36,21 @@ function safe(s) { return (s || "user").replaceAll(/[^a-zA-Z0-9_-]/g, "_"); }
 function scenarioIdOf(day, mode, horizonMin, n) { return `${day}|${mode}|${horizonMin}|${n}`; }
 
 export default function App() {
+  // --- ROUTING LOGIK ---
+  const [route, setRoute] = useState(window.location.hash);
+
+  useEffect(() => {
+    const onHashChange = () => setRoute(window.location.hash);
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  // Wenn URL endet auf #/auswertung -> Zeige Advanced Page
+  if (route === "#/auswertung") {
+    return <AdvancedAnalysisPage />;
+  }
+  // ---------------------
+
   const persisted = loadState();
   const persistedDataset = loadDataset();
 
@@ -198,13 +217,16 @@ export default function App() {
           <div className="mt-4 flex flex-wrap gap-2">
             <button type="button" onClick={() => setShowOnboarding(true)} className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700">Profil</button>
             <button type="button" onClick={onResetAllLocal} className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700">Neu starten</button>
+            {/* Link zur Advanced Page */}
+            <a href="#/auswertung" className="rounded-xl bg-purple-100 border border-purple-200 px-3 py-2 text-sm font-medium text-purple-700 hover:bg-purple-200">
+               ⚡ Advanced Stats
+            </a>
           </div>
         </div>
 
-<SessionProgress count={logs.length} />
+        <SessionProgress count={logs.length} />
         <TrainingMixBar currentHours={horizonHours} />
 
-        {/* --- NEU: Gruppen-Analyse Bereich --- */}
         <div className="mt-6">
           <ProfileAnalyzer />
         </div>
