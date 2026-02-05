@@ -14,7 +14,7 @@ import DecisionCard from "./ui/DecisionCard.jsx";
 import SessionProgress from "./ui/SessionProgress.jsx";
 import TrainingMixBar from "./ui/TrainingMixBar.jsx";
 import OnboardingModal from "./ui/OnboardingModal.jsx";
-
+import ProfileAnalyzer from "./ui/ProfileAnalyzer.jsx";
 const FIXED_MODE = "LOCKER";
 const FIXED_ACCOUNTS = 3;
 
@@ -49,6 +49,7 @@ export default function App() {
 
   const mode = FIXED_MODE;
   const accounts = FIXED_ACCOUNTS;
+
   const horizonHours = selectTrainingHorizon(round);
   const horizonMin = horizonHours * 60;
 
@@ -200,8 +201,13 @@ export default function App() {
           </div>
         </div>
 
-        <SessionProgress count={logs.length} />
+<SessionProgress count={logs.length} />
         <TrainingMixBar currentHours={horizonHours} />
+
+        {/* --- NEU: Gruppen-Analyse Bereich --- */}
+        <div className="mt-6">
+          <ProfileAnalyzer />
+        </div>
       </header>
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
