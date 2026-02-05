@@ -86,7 +86,27 @@ export default function App() {
     return () => { active = false; };
   }, [datasetState]);
 
-  // 3. Routing-Weichen (JETZT NACH DEN STATES!)
+  // Log-Handler für Perfectioning
+  const handlePerfectioningLog = (data) => {
+    const row = buildLogRow({
+      userId,
+      scenarioId: `PERF|${Date.now()}`,
+      day: "SIMULATION",
+      mode: "PERFECTIONING",
+      horizonMin: data.featA.totalPlannedMin || 480,
+      accounts: 0,
+      choice: data.choice,
+      scoreA: 0,
+      scoreB: 0,
+      pChooseA: 0.5,
+      featA: data.featA,
+      featB: data.featB,
+      profile
+    });
+    setLogs((prev) => [...prev, row]);
+  };
+
+  // 3. Routing-Weichen
   if (route === "#/auswertung") {
     return <AdvancedAnalysisPage />;
   }
@@ -99,13 +119,14 @@ export default function App() {
         userId={userId}
         onBack={() => {
             window.location.hash = "";
-            setRoute(""); // Sofortiges UI Update
+            setRoute(""); 
         }}
+        onLog={handlePerfectioningLog}
       />
     );
   }
 
-  // 4. Haupt-App Logik (wird nur ausgeführt, wenn keine Route oben gematcht hat)
+  // 4. Haupt-App Logik (gekürzt)
   if (isLoadingDataset && (!datasetState?.dataset || !datasetState?.matrix)) {
     return <main className="mx-auto min-h-screen max-w-6xl px-4 py-10 md:px-6"><div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">Trainingsdaten werden geladen …</div></main>;
   }
@@ -241,8 +262,6 @@ export default function App() {
     </main>
   );
 }
-
-// --- Hilfsfunktionen (bleiben gleich) ---
 
 function softmaxProb(a, b) {
   const ma = Math.max(a, b);
