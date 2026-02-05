@@ -173,13 +173,20 @@ export async function buildDatasetFromRepository() {
   const dataset = {
     rooms: null,
     days: {},
-    meta: { source: "repo_public_data", createdAtISO: new Date().toISOString(), dayCount: 0 }
+    meta: {
+      source: "repo_public_data",
+      createdAtISO: new Date().toISOString(),
+      dayCount: 0,
+      filesAttempted: dayFiles.length,
+      filesSkipped: 0
+    }
   };
 
   for (const fileName of dayFiles) {
     const day = parseDayFromFilename(fileName);
     if (!day) {
       console.warn(`Überspringe ungültigen Dateinamen: ${fileName}`);
+      dataset.meta.filesSkipped += 1;
       continue;
     }
 
@@ -189,6 +196,7 @@ export async function buildDatasetFromRepository() {
 
       if (!dayObj) {
         console.warn(`Überspringe ${fileName}: keine kompatiblen Slotdaten gefunden.`);
+        dataset.meta.filesSkipped += 1;
         continue;
       }
 
@@ -196,6 +204,7 @@ export async function buildDatasetFromRepository() {
       if (!dataset.rooms && rooms) dataset.rooms = rooms;
     } catch (e) {
       console.warn(`Fehler beim Laden von ${fileName}:`, e);
+      dataset.meta.filesSkipped += 1;
     }
   }
 
