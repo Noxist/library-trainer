@@ -1,4 +1,4 @@
-// src/engine/dayIndex.js
+// /src/engine/dayIndex.js
 import { timeToMinutes } from "./time.js";
 
 export function listDays(dataset) {
@@ -25,22 +25,13 @@ export function buildDayIndexForDay(dataset, day) {
     const arr = new Uint8Array(slotTimes.length);
     for (let i = 0; i < slotTimes.length; i++) {
       const t = slotTimes[i];
-      // 0 = frei, 1 = besetzt
       arr[i] = slotsObj[t] ? 1 : 0;
     }
     slotsByRoom.set(r, arr);
     freeRunsByRoom.set(r, computeFreeRuns(arr));
   }
 
-  return {
-    day,
-    roomIds,
-    slotTimes,
-    dayStartMin,
-    dayEndMin,
-    slotsByRoom,
-    freeRunsByRoom
-  };
+  return { day, roomIds, slotTimes, dayStartMin, dayEndMin, slotsByRoom, freeRunsByRoom };
 }
 
 function computeFreeRuns(occArr) {
@@ -55,4 +46,3 @@ function computeFreeRuns(occArr) {
   }
   return runs;
 }
-
