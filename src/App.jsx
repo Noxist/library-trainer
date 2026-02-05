@@ -10,15 +10,6 @@ import { buildDatasetFromRepository, buildDatasetFromUploads } from "./engine/da
 
 import { loadState, saveState, resetState, saveDataset, loadDataset, resetDataset } from "./utils/storage.js";
 import { downloadTextFile, toCsvRow } from "./utils/csv.js";
-import { selectTrainingHorizon } from "./engine/selectTrainingHorizon.js";
-import { generateStrategies } from "./engine/strategyGenerator.js";
-
-const horizonHours = selectTrainingHorizon(roundIndex);
-
-const { A, B } = generateStrategies({ horizonHours });
-
-// A.walkMeters → Engine-Wahrheit
-// normalize(A.walkMeters, 600) → UI-Übersetzung
 
 const SOFT_TARGET_QUESTIONS = 250;
 
@@ -63,7 +54,7 @@ export default function App() {
   });
 
   // Persist main state
-  useMemo(() => {
+  useEffect(() => {
     saveState({ userId, mode, horizonMin, accounts, profile, modelState, logs, round });
   }, [userId, mode, horizonMin, accounts, profile, modelState, logs, round]);
 
@@ -185,8 +176,8 @@ export default function App() {
       profile
     });
 
-    setLogs([...logs, row]);
-    setRound(round + 1);
+    setLogs((prev) => [...prev, row]);
+    setRound((prev) => prev + 1);
   }
 
   function onExportChoicesCsv() {
@@ -269,8 +260,8 @@ export default function App() {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
-        <StrategyCard title="Strategie A" strategy={strategyA} features={featA} score={scoreA} onChoose={() => onChoose("A")} />
-        <StrategyCard title="Strategie B" strategy={strategyB} features={featB} score={scoreB} onChoose={() => onChoose("B")} />
+        <StrategyCard title="Strategie A" strategy={strategyA} features={featA} score={scoreA} onChoose={() => onChoose("A")} disabled={!userId.trim()} />
+        <StrategyCard title="Strategie B" strategy={strategyB} features={featB} score={scoreB} onChoose={() => onChoose("B")} disabled={!userId.trim()} />
       </div>
 
       <div style={{ marginTop: 12, fontSize: 13 }}>
@@ -352,7 +343,7 @@ function DatasetUploader({ onLoaded, onReset }) {
   );
 }
 
-function StrategyCard({ title, strategy, features, score, onChoose }) {
+function StrategyCard({ title, strategy, features, score, onChoose, disabled }) {
   return (
     <Card title={title}>
       <div style={{ fontSize: 13, marginBottom: 8 }}>Policy: {strategy.policy}</div>
@@ -390,7 +381,7 @@ function StrategyCard({ title, strategy, features, score, onChoose }) {
         </details>
       )}
 
-      <button onClick={onChoose} style={{ marginTop: 10, width: "100%" }}>
+      <button onClick={onChoose} disabled={disabled} style={{ marginTop: 10, width: "100%" }}>
         Waehle {title.endsWith("A") ? "A" : "B"}
       </button>
     </Card>
