@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { runDeepAnalysis, parseCsvData } from "../engine/advancedAnalysis.js";
+import { runDeepAnalysis, parseCsvData, generateExportData } from "../engine/advancedAnalysis.js";
 
 export default function AdvancedAnalysisPage() {
   const [files, setFiles] = useState([]);
@@ -11,7 +11,6 @@ export default function AdvancedAnalysisPage() {
   const handleFiles = async (e) => {
     const fileList = Array.from(e.target.files);
     const parsedData = [];
-    
     for (const f of fileList) {
       const text = await f.text();
       const data = parseCsvData(text, f.name);
@@ -34,39 +33,52 @@ export default function AdvancedAnalysisPage() {
       setResult(res);
     } catch (err) {
       console.error(err);
-      setProgressMsg("Fehler bei der Analyse!");
+      setProgressMsg("Fehler: " + err.message);
     } finally {
       setIsAnalyzing(false);
     }
   };
 
+  const downloadReport = () => {
+      if(!result) return;
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(generateExportData(result));
+      const downloadAnchorNode = document.createElement('a');
+      downloadAnchorNode.setAttribute("href", dataStr);
+      downloadAnchorNode.setAttribute("download", "deep_analysis_report.json");
+      document.body.appendChild(downloadAnchorNode);
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 px-4 py-8 md:px-8">
-      <div className="mx-auto max-w-5xl space-y-8">
+    <div className="min-h-screen bg-slate-900 text-slate-100 px-4 py-8 md:px-8">
+      <div className="mx-auto max-w-6xl space-y-8">
         
         {/* Header */}
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Advanced Trainer Analysis <span className="text-xs align-top bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">PRO</span></h1>
-          <p className="text-slate-500 mt-2">Iterative Feature-Fixing & Hyperparameter Grid Search</p>
+        <div className="border-b border-slate-700 pb-6">
+          <h1 className="text-3xl font-bold text-white tracking-tight">Deep Learning Laboratory <span className="text-xs bg-indigo-500 text-white px-2 py-0.5 rounded ml-2">BRUTE FORCE</span></h1>
+          <p className="text-slate-400 mt-2">Hochpräzisions-Training durch Grid-Search, Permutation Feature Importance & massives Bootstrapping.</p>
         </div>
 
         {/* Upload Section */}
-        <div className="rounded-2xl bg-white p-8 shadow-sm border border-slate-200">
-          <div className="flex flex-col items-center justify-center space-y-4">
-            <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center">
-              <svg className="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
-            </div>
-            <label className="cursor-pointer rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 font-medium transition">
-              CSV Dateien wählen
-              <input type="file" multiple accept=".csv" className="hidden" onChange={handleFiles} />
+        <div className="rounded-2xl bg-slate-800 p-8 shadow-xl border border-slate-700">
+          <div className="flex flex-col items-center justify-center space-y-6">
+            <label className="flex flex-col items-center cursor-pointer group">
+                <div className="h-20 w-20 rounded-full bg-slate-700 flex items-center justify-center group-hover:bg-indigo-600 transition-colors duration-300">
+                  <svg className="h-10 w-10 text-slate-300 group-hover:text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                </div>
+                <span className="mt-4 text-lg font-medium text-slate-300 group-hover:text-white">CSV Trainingsdaten laden</span>
+                <input type="file" multiple accept=".csv" className="hidden" onChange={handleFiles} />
             </label>
-            <p className="text-sm text-slate-400">{files.length} Dateien geladen ({files.reduce((a, b) => a + b.rows.length, 0)} Entscheidungen)</p>
+            {files.length > 0 && (
+                <p className="text-sm text-indigo-400 font-mono">{files.length} Dateien bereit. ({files.reduce((a, b) => a + b.rows.length, 0)} Samples)</p>
+            )}
           </div>
 
           {files.length > 0 && !isAnalyzing && !result && (
              <div className="mt-8 flex justify-center">
-               <button onClick={startAnalysis} className="rounded-xl bg-purple-600 px-8 py-3 text-lg font-bold text-white shadow-lg hover:bg-purple-700 hover:shadow-purple-200 transition transform hover:-translate-y-0.5">
-                 Analyse starten (CPU intensiv)
+               <button onClick={startAnalysis} className="rounded-xl bg-indigo-600 px-10 py-4 text-lg font-bold text-white shadow-lg hover:bg-indigo-500 transition transform hover:scale-105">
+                 MAXIMUM POWER Starten (Min. 2 Min)
                </button>
              </div>
           )}
@@ -74,87 +86,93 @@ export default function AdvancedAnalysisPage() {
 
         {/* Progress UI */}
         {isAnalyzing && (
-          <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-200 animate-pulse">
-            <div className="flex justify-between text-sm font-medium text-slate-700 mb-2">
-              <span>{progressMsg}</span>
-              <span>{Math.round(progress * 100)}%</span>
+          <div className="rounded-2xl bg-slate-800 p-8 shadow-lg border border-slate-700">
+            <div className="flex justify-between text-sm font-mono text-indigo-300 mb-2">
+              <span className="animate-pulse">> {progressMsg}</span>
+              <span>{(progress * 100).toFixed(1)}%</span>
             </div>
-            <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden">
-              <div className="h-full bg-purple-600 transition-all duration-300 ease-out" style={{ width: `${progress * 100}%` }}></div>
+            <div className="h-6 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-700">
+              <div className="h-full bg-indigo-500 relative overflow-hidden" style={{ width: `${progress * 100}%` }}>
+                  <div className="absolute inset-0 bg-white/20 animate-[shimmer_2s_infinite]"></div>
+              </div>
             </div>
-            <p className="text-xs text-slate-400 mt-2 text-center">Dein PC wird jetzt warm...</p>
+            <p className="text-xs text-slate-500 mt-3 text-center font-mono">CPU-Kerne werden ausgelastet... Bitte warten.</p>
           </div>
         )}
 
         {/* Results */}
         {result && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700">
             
+            <div className="flex justify-between items-center">
+                <h2 className="text-2xl font-semibold text-white">Analyse Ergebnisse</h2>
+                <button onClick={downloadReport} className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 transition">
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                    Full Report Exportieren (.json)
+                </button>
+            </div>
+
             {/* Top Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="rounded-xl bg-white p-4 border border-slate-200 shadow-sm">
-                <div className="text-sm text-slate-500">Trainings-Genauigkeit (CV)</div>
-                <div className="text-2xl font-bold text-slate-900">{(result.accuracy * 100).toFixed(1)}%</div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="rounded-xl bg-slate-800 p-5 border border-slate-700">
+                <div className="text-xs text-slate-400 uppercase tracking-wider">Modell-Genauigkeit</div>
+                <div className="text-3xl font-bold text-emerald-400">{(result.accuracy * 100).toFixed(2)}%</div>
               </div>
-              <div className="rounded-xl bg-white p-4 border border-slate-200 shadow-sm">
-                <div className="text-sm text-slate-500">Optimale Hyperparameter</div>
-                <div className="text-lg font-medium text-slate-900">LR: {result.bestParams.lr} | L2: {result.bestParams.l2}</div>
+              <div className="rounded-xl bg-slate-800 p-5 border border-slate-700">
+                <div className="text-xs text-slate-400 uppercase tracking-wider">Beste Lernrate</div>
+                <div className="text-xl font-mono text-white">{result.bestParams.lr}</div>
               </div>
-              <div className="rounded-xl bg-white p-4 border border-slate-200 shadow-sm">
-                <div className="text-sm text-slate-500">Datensätze</div>
-                <div className="text-2xl font-bold text-slate-900">{result.rowCount}</div>
+              <div className="rounded-xl bg-slate-800 p-5 border border-slate-700">
+                <div className="text-xs text-slate-400 uppercase tracking-wider">Daten-Konsistenz</div>
+                <div className="text-xl font-mono text-white">{100 - (result.inconsistencies.length / result.rowCount * 100).toFixed(1)}%</div>
+              </div>
+              <div className="rounded-xl bg-slate-800 p-5 border border-slate-700">
+                <div className="text-xs text-slate-400 uppercase tracking-wider">Samples</div>
+                <div className="text-xl font-mono text-white">{result.rowCount}</div>
               </div>
             </div>
 
             {/* Weights Chart */}
-            <div className="rounded-2xl bg-white p-6 border border-slate-200 shadow-sm">
-              <h3 className="text-lg font-semibold text-slate-900 mb-6">Deep Analysis Weights</h3>
-              <div className="space-y-4">
+            <div className="rounded-2xl bg-slate-800 p-6 border border-slate-700">
+              <h3 className="text-lg font-semibold text-white mb-6">Faktor-Gewichtung & Stabilität</h3>
+              <div className="space-y-6">
                 {Object.entries(result.weights)
-                  .sort((a, b) => Math.abs(b[1].value) - Math.abs(a[1].value))
+                  .sort((a, b) => Math.abs(b[1].mean) - Math.abs(a[1].mean))
                   .map(([key, stat]) => (
-                    <div key={key} className="grid grid-cols-12 gap-4 items-center">
-                      <div className="col-span-4 md:col-span-3 text-sm font-medium text-slate-600 truncate" title={key}>
-                        {key}
-                        {stat.isDominant && <span className="ml-2 inline-block h-2 w-2 rounded-full bg-purple-500" title="Dominantes Feature (Fixiert)"></span>}
+                    <div key={key}>
+                      <div className="flex justify-between text-sm mb-1">
+                          <span className="font-medium text-slate-300">{key}</span>
+                          <span className="font-mono text-slate-400">{stat.mean.toFixed(3)} <span className="text-xs text-slate-600">±{stat.stdDev.toFixed(3)}</span></span>
                       </div>
                       
-                      <div className="col-span-6 md:col-span-7 relative h-8 bg-slate-50 rounded-md flex items-center">
+                      <div className="relative h-10 bg-slate-900 rounded-md flex items-center px-2 border border-slate-700/50">
                         {/* Center Line */}
-                        <div className="absolute left-1/2 top-0 bottom-0 w-px bg-slate-300"></div>
+                        <div className="absolute left-1/2 top-0 bottom-0 w-px bg-slate-600 z-10"></div>
                         
                         {/* Bar */}
                         <div 
-                          className={`h-4 rounded-sm transition-all duration-500 ${stat.value > 0 ? 'bg-emerald-500' : 'bg-rose-500'} ${stat.isDominant ? 'ring-2 ring-purple-200' : ''}`}
+                          className={`h-6 rounded-sm transition-all shadow-[0_0_15px_rgba(0,0,0,0.3)] ${stat.mean > 0 ? 'bg-emerald-500 shadow-emerald-500/20' : 'bg-rose-500 shadow-rose-500/20'}`}
                           style={{
-                            marginLeft: stat.value > 0 ? '50%' : `calc(50% - ${Math.min(50, Math.abs(stat.value) * 10)}%)`,
-                            width: `${Math.min(50, Math.abs(stat.value) * 10)}%`
+                            marginLeft: stat.mean > 0 ? '50%' : `calc(50% - ${Math.min(48, Math.abs(stat.mean) * 5)}%)`,
+                            width: `${Math.min(48, Math.abs(stat.mean) * 5)}%`
                           }}
                         ></div>
 
                         {/* Confidence Interval (StdDev) */}
                         <div 
-                          className="absolute h-1 bg-slate-900 opacity-20 top-1/2 -mt-0.5"
+                          className="absolute h-2 bg-white/40 top-1/2 -mt-1 rounded-sm z-20"
                           style={{
-                             left: `calc(50% + ${(stat.value - stat.stdDev) * 10}%)`,
-                             width: `${stat.stdDev * 2 * 10}%`
+                             left: `calc(50% + ${(stat.mean - stat.stdDev) * 5}%)`,
+                             width: `${stat.stdDev * 2 * 5}%`
                           }}
                         ></div>
                       </div>
-
-                      <div className="col-span-2 text-right text-xs font-mono text-slate-500">
-                        {stat.value.toFixed(2)}
-                        <br/>
-                        <span className="text-[10px] text-slate-300">±{stat.stdDev.toFixed(2)}</span>
+                      <div className="text-[10px] text-slate-500 mt-1 flex justify-end">
+                          Wichtigkeit (Impact): {(stat.importance * 100).toFixed(2)}%
                       </div>
                     </div>
                   ))}
               </div>
-              <p className="mt-6 text-xs text-slate-400 text-center">
-                <span className="inline-block w-2 h-2 rounded-full bg-purple-500 mr-1"></span> Dominante Features wurden fixiert, um schwächere Signale rauschfreier zu messen.
-                <br/>
-                Der schwarze Strich im Balken zeigt die Unsicherheit (Standardabweichung).
-              </p>
             </div>
           </div>
         )}
