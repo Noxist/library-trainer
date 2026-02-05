@@ -18,12 +18,24 @@ function stabilityText(score) {
 }
 
 export default function DecisionCard({ title, strategy, features, onChoose, disabled }) {
-  const rooms = Array.from(new Set((strategy?.blocks || []).map((b) => b.room)));
+  // 1. Support für Simulation (steps) vs. Echt (blocks)
+  const dataPoints = strategy?.blocks || strategy?.steps || [];
+  const rooms = Array.from(new Set(dataPoints.map((b) => b.room)));
+  
   const seats = rooms.map((room) => getSeats(room)).filter((v) => typeof v === "number");
   const typicalSeats = median(seats);
-  const roomSize = rooms.length > 1 ? `mix (typisch: ${getRoomSizeLabel(typicalSeats)})` : getRoomSizeLabel(typicalSeats);
+  
+  // Wenn keine Sitze bekannt (Simulation), nehmen wir einen Standardwert "mittel" an
+  const roomSizeLabel = typicalSeats 
+    ? getRoomSizeLabel(typicalSeats) 
+    : "mittel (Sim)";
+    
+  const roomSize = rooms.length > 1 
+    ? `mix (typisch: ${roomSizeLabel})` 
+    : roomSizeLabel;
 
   const stabilityRatio = clamp01(features?.stabilityScore ?? 0);
+  
   const debug = {
     distanceNorm: features?.distanceNorm ?? 0,
     waitPenalty: features?.waitPenalty ?? 0,
@@ -32,8 +44,20 @@ export default function DecisionCard({ title, strategy, features, onChoose, disa
     productiveLossMin: features?.productiveLossMin ?? 0
   };
 
+  // 2. WICHTIG: Prüfen, ob wir im Simulations-Modus sind ("forcedStats")
+  // Falls ja, nehmen wir die fake Werte. Falls nein, die echten Features.
+  const isSim = !!strategy?.forcedStats;
+  
+  const displayValues = {
+    walk: isSim ? strategy.forcedStats.distance : `${features.walkMeters ?? 0} m`,
+    wait: isSim ? strategy.forcedStats.gap : `${features.waitMinutesTotal ?? 0} min`,
+    switches: isSim ? strategy.forcedStats.switches : (features.switches ?? 0),
+    // Wenn geplant (Sim), dann das anzeigen, sonst default
+    planned: isSim ? strategy.forcedStats.planned : null
+  };
+
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-6">
+    <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-6 transition hover:shadow-md">
       <h3 className="text-lg font-semibold text-slate-900">Strategie {title}</h3>
 
       <div className="mt-4 space-y-2 text-sm text-slate-700">
@@ -42,19 +66,23 @@ export default function DecisionCard({ title, strategy, features, onChoose, disa
           {rooms.map((room) => {
             const roomSeats = getSeats(room);
             return (
-              <span key={room} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-                {room} ({roomSeats ?? "?"} Sitzplätze)
+              <span key={room} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 border border-slate-200">
+                {room} {roomSeats ? `(${roomSeats} Plätze)` : ""}
               </span>
             );
           })}
+          {rooms.length === 0 && <span className="text-slate-400 italic">Keine Räume</span>}
         </div>
       </div>
 
       <dl className="mt-5 grid grid-cols-1 gap-3 text-sm text-slate-700 sm:grid-cols-2">
-        <Metric label="Fussweg" value={`${features.walkMeters} m`} />
-        <Metric label="Zeit ohne Raum" value={`${features.waitMinutesTotal} min`} />
-        <Metric label="Raumwechsel" value={`${features.switches}`} />
+        <Metric label="Fussweg" value={displayValues.walk} />
+        <Metric label="Zeit ohne Raum" value={displayValues.wait} />
+        <Metric label="Raumwechsel" value={displayValues.switches} />
         <Metric label="Raumgrösse" value={roomSize} />
+        {displayValues.planned && (
+             <Metric label="Geplante Zeit" value={displayValues.planned} />
+        )}
       </dl>
 
       <div className="mt-4">
@@ -67,14 +95,13 @@ export default function DecisionCard({ title, strategy, features, onChoose, disa
         </div>
       </div>
 
-      <details className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
-        <summary className="cursor-pointer font-medium text-slate-700">Details</summary>
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <span>distanceNorm: {debug.distanceNorm.toFixed(3)}</span>
-          <span>waitPenalty: {debug.waitPenalty.toFixed(3)}</span>
-          <span>switchPenalty: {debug.switchPenalty.toFixed(3)}</span>
-          <span>riskLateMin: {debug.riskLateMin.toFixed(2)}</span>
-          <span>productiveLossMin: {debug.productiveLossMin.toFixed(2)}</span>
+      <details className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-600 border border-slate-100">
+        <summary className="cursor-pointer font-medium text-slate-700">AI Features (Debug)</summary>
+        <div className="mt-2 grid grid-cols-2 gap-y-1 gap-x-4 sm:grid-cols-2">
+          <span title="Bestrafung für Laufweg">dist: {debug.distanceNorm.toFixed(2)}</span>
+          <span title="Bestrafung für Warten">wait: {debug.waitPenalty.toFixed(2)}</span>
+          <span title="Bestrafung für Wechsel">switch: {debug.switchPenalty.toFixed(2)}</span>
+          <span title="Zeitverlust durch Wechsel">prodLoss: {debug.productiveLossMin.toFixed(0)}</span>
         </div>
       </details>
 
@@ -82,7 +109,7 @@ export default function DecisionCard({ title, strategy, features, onChoose, disa
         type="button"
         onClick={onChoose}
         disabled={disabled}
-        className="mt-5 w-full rounded-xl bg-indigo-600 px-4 py-3 text-base font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+        className="mt-5 w-full rounded-xl bg-indigo-600 px-4 py-3 text-base font-semibold text-white transition hover:bg-indigo-700 hover:shadow-lg disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
       >
         Diese Strategie wählen
       </button>
@@ -92,9 +119,9 @@ export default function DecisionCard({ title, strategy, features, onChoose, disa
 
 function Metric({ label, value }) {
   return (
-    <div className="rounded-xl bg-slate-50 px-3 py-2">
-      <dt className="text-xs uppercase tracking-wide text-slate-500">{label}</dt>
-      <dd className="mt-1 font-semibold text-slate-900">{value}</dd>
+    <div className="rounded-xl bg-slate-50 px-3 py-2 border border-slate-100">
+      <dt className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">{label}</dt>
+      <dd className="mt-0.5 font-semibold text-slate-900">{value}</dd>
     </div>
   );
 }
