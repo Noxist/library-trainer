@@ -17,6 +17,7 @@ import OnboardingModal from "./ui/OnboardingModal.jsx";
 
 // Import der Advanced Page für das Routing
 import AdvancedAnalysisPage from "./ui/AdvancedAnalysisPage.jsx";
+import PerfectioningPage from "./ui/PerfectioningPage.jsx";
 
 const FIXED_MODE = "LOCKER";
 const FIXED_ACCOUNTS = 3;
@@ -35,21 +36,9 @@ function safe(s) { return (s || "user").replaceAll(/[^a-zA-Z0-9_-]/g, "_"); }
 function scenarioIdOf(day, mode, horizonMin, n) { return `${day}|${mode}|${horizonMin}|${n}`; }
 
 export default function App() {
-  // --- ROUTING LOGIK ---
+  // 1. States definieren
   const [route, setRoute] = useState(window.location.hash);
-
-  useEffect(() => {
-    const onHashChange = () => setRoute(window.location.hash);
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
-  }, []);
-
-  // Wenn URL endet auf #/auswertung -> Zeige Advanced Page
-  if (route === "#/auswertung") {
-    return <AdvancedAnalysisPage />;
-  }
-  // ---------------------
-
+  
   const persisted = loadState();
   const persistedDataset = loadDataset();
 
@@ -65,15 +54,16 @@ export default function App() {
   const [isLoadingDataset, setIsLoadingDataset] = useState(!persistedDataset);
   const [showOnboarding, setShowOnboarding] = useState(!persisted?.userId);
 
-  const mode = FIXED_MODE;
-  const accounts = FIXED_ACCOUNTS;
-
-  const horizonHours = selectTrainingHorizon(round);
-  const horizonMin = horizonHours * 60;
+  // 2. Effects
+  useEffect(() => {
+    const onHashChange = () => setRoute(window.location.hash);
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
 
   useEffect(() => {
-    saveState({ userId, mode, horizonMin, accounts, profile, modelState, logs, round });
-  }, [userId, mode, horizonMin, accounts, profile, modelState, logs, round]);
+    saveState({ userId, mode: FIXED_MODE, horizonMin: selectTrainingHorizon(round) * 60, accounts: FIXED_ACCOUNTS, profile, modelState, logs, round });
+  }, [userId, profile, modelState, logs, round]);
 
   useEffect(() => {
     if (datasetState?.dataset && datasetState?.matrix) return;
@@ -96,6 +86,26 @@ export default function App() {
     return () => { active = false; };
   }, [datasetState]);
 
+  // 3. Routing-Weichen (JETZT NACH DEN STATES!)
+  if (route === "#/auswertung") {
+    return <AdvancedAnalysisPage />;
+  }
+
+  if (route === "#/perfectioning") {
+    return (
+      <PerfectioningPage 
+        modelState={modelState} 
+        setModelState={setModelState}
+        userId={userId}
+        onBack={() => {
+            window.location.hash = "";
+            setRoute(""); // Sofortiges UI Update
+        }}
+      />
+    );
+  }
+
+  // 4. Haupt-App Logik (wird nur ausgeführt, wenn keine Route oben gematcht hat)
   if (isLoadingDataset && (!datasetState?.dataset || !datasetState?.matrix)) {
     return <main className="mx-auto min-h-screen max-w-6xl px-4 py-10 md:px-6"><div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">Trainingsdaten werden geladen …</div></main>;
   }
@@ -106,6 +116,10 @@ export default function App() {
 
   const dataset = datasetState.dataset;
   const matrix = datasetState.matrix;
+  const mode = FIXED_MODE;
+  const accounts = FIXED_ACCOUNTS;
+  const horizonHours = selectTrainingHorizon(round);
+  const horizonMin = horizonHours * 60;
 
   let dayIndex = null;
   let day = null;
@@ -147,19 +161,8 @@ export default function App() {
     setModelState((prev) => ({ ...prev, [mode]: { weights: upd.weights, opt: upd.opt } }));
 
     const row = buildLogRow({
-      userId,
-      scenarioId,
-      day,
-      mode,
-      horizonMin,
-      accounts,
-      choice,
-      scoreA,
-      scoreB,
-      pChooseA,
-      featA,
-      featB,
-      profile
+      userId, scenarioId, day, mode, horizonMin, accounts, choice,
+      scoreA, scoreB, pChooseA, featA, featB, profile
     });
 
     setLogs((prev) => [...prev, row]);
@@ -239,6 +242,8 @@ export default function App() {
   );
 }
 
+// --- Hilfsfunktionen (bleiben gleich) ---
+
 function softmaxProb(a, b) {
   const ma = Math.max(a, b);
   const ea = Math.exp(a - ma);
@@ -255,18 +260,8 @@ function scoreFromWeights(w, f) {
 function buildLogRow({ userId, scenarioId, day, mode, horizonMin, accounts, choice, scoreA, scoreB, pChooseA, featA, featB, profile }) {
   const p = profile;
   return {
-    tsISO: nowISO(),
-    userId,
-    scenarioId,
-    day,
-    mode,
-    horizonMin,
-    accounts,
-    choice,
-    scoreA: scoreA.toFixed(6),
-    scoreB: scoreB.toFixed(6),
-    pChooseA: pChooseA.toFixed(6),
-
+    tsISO: nowISO(), userId, scenarioId, day, mode, horizonMin, accounts, choice,
+    scoreA: scoreA.toFixed(6), scoreB: scoreB.toFixed(6), pChooseA: pChooseA.toFixed(6),
     A_distanceNorm: featA.distanceNorm.toFixed(6),
     A_waitPenalty: featA.waitPenalty.toFixed(6),
     A_switchPenalty: featA.switchPenalty.toFixed(6),
@@ -275,7 +270,6 @@ function buildLogRow({ userId, scenarioId, day, mode, horizonMin, accounts, choi
     A_riskLateMin: featA.riskLateMin.toFixed(6),
     A_totalPlannedMin: featA.totalPlannedMin,
     A_totalCoveredMin: featA.totalCoveredMin,
-
     B_distanceNorm: featB.distanceNorm.toFixed(6),
     B_waitPenalty: featB.waitPenalty.toFixed(6),
     B_switchPenalty: featB.switchPenalty.toFixed(6),
@@ -284,7 +278,6 @@ function buildLogRow({ userId, scenarioId, day, mode, horizonMin, accounts, choi
     B_riskLateMin: featB.riskLateMin.toFixed(6),
     B_totalPlannedMin: featB.totalPlannedMin,
     B_totalCoveredMin: featB.totalCoveredMin,
-
     prof_morningMean: p.delayByBucket.MORNING.meanMin,
     prof_morningStd: p.delayByBucket.MORNING.stdMin,
     prof_middayMean: p.delayByBucket.MIDDAY.meanMin,
