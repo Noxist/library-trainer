@@ -84,12 +84,42 @@ export default function srcApp() {
   const dataset = datasetState.dataset;
   const matrix = datasetState.matrix;
 
-  const allDays = useMemo(() => listDays(dataset), [dataset]);
+// --- FIX: Sicherung gegen Absturz bei defekten Daten ---
+  let allDays = [];
+  try {
+    allDays = listDays(dataset);
+  } catch (e) {
+    console.error("Fehler beim Lesen der Tage:", e);
+    // Fallback: Dataset resetten erzwingen, wenn es kaputt ist
+  }
+
   const day = allDays.length ? allDays[round % allDays.length] : null;
 
-  const dayIndex = useMemo(() => buildDayIndexForDay(dataset, day), [dataset, day]);
-  const scenarioId = useMemo(() => scenarioIdOf(day, mode, horizonMin, round), [day, mode, horizonMin, round]);
+  const dayIndex = useMemo(() => {
+    if (!day) return null;
+    try {
+      return buildDayIndexForDay(dataset, day);
+    } catch (e) {
+      console.error(`Fehler bei Tag ${day}:`, e);
+      return null;
+    }
+  }, [dataset, day]);
 
+  // Wenn Daten korrupt sind, UI resetten statt Absturz
+  if (dataset && (!allDays.length || !dayIndex)) {
+    return (
+      <div style={{ padding: 20, fontFamily: "system-ui", color: "red" }}>
+        <h3>Fehler im geladenen Dataset</h3>
+        <p>Die Daten scheinen beschädigt oder inkompatibel zu sein.</p>
+        <button onClick={() => { resetDataset(); setDatasetState(null); window.location.reload(); }}>
+          Dataset zurücksetzen & neu laden
+        </button>
+      </div>
+    );
+  }
+  // --- ENDE FIX ---
+
+  const scenarioId = useMemo(() => scenarioIdOf(day, mode, horizonMin, round), [day, mode, horizonMin, round]);
   const { strategyA, strategyB } = useMemo(() => {
     return generateTwoStrategies({
       dayIndex,
