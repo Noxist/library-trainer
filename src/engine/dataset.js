@@ -1,4 +1,4 @@
-// /src/engine/dataset.js
+// src/engine/dataset.js
 export function parseDayFromFilename(filename) {
   const m = filename.match(/^(\d{4}-\d{2}-\d{2})_ml\.json$/);
   return m ? m[1] : null;
@@ -7,6 +7,36 @@ export function parseDayFromFilename(filename) {
 export async function readJsonFile(file) {
   const text = await file.text();
   return JSON.parse(text);
+}
+
+// Hilfsfunktion zum Erkennen verschiedener JSON-Formate
+function extractDayData(json, day) {
+  let dayObj = null;
+  let rooms = null;
+
+  // Format 1: Neue Struktur mit "data" und "slots" (Deine Dateien)
+  if (json?.data?.slots) {
+    dayObj = json.data.slots;
+    if (Array.isArray(json.data.rooms)) rooms = json.data.rooms;
+  }
+  // Format 2: Struktur mit "days"-Objekt
+  else if (json?.days?.[day]) {
+    dayObj = json.days[day];
+    if (Array.isArray(json.rooms)) rooms = json.rooms;
+  }
+  // Format 3: Struktur mit "days" und nur einem Key
+  else if (json?.days && Object.keys(json.days).length === 1) {
+    const onlyKey = Object.keys(json.days)[0];
+    dayObj = json.days[onlyKey];
+    if (Array.isArray(json.rooms)) rooms = json.rooms;
+  }
+  // Format 4: Struktur mit "roomsData"
+  else if (json?.roomsData) {
+    dayObj = json.roomsData;
+    if (Array.isArray(json.rooms)) rooms = json.rooms;
+  }
+
+  return { dayObj, rooms };
 }
 
 export async function buildDatasetFromUploads(dayFiles, matrixFile) {
@@ -30,39 +60,18 @@ export async function buildDatasetFromUploads(dayFiles, matrixFile) {
     if (!day) throw new Error(`Ungültiger Tages-Dateiname: ${f.name} (erwartet YYYY-MM-DD_ml.json)`);
 
     const json = await readJsonFile(f);
+    const { dayObj, rooms } = extractDayData(json, day);
 
-    let dayObj = null;
-    if (json?.days?.[day]) {
-      dayObj = json.days[day];
-      if (!dataset.rooms && Array.isArray(json.rooms)) dataset.rooms = json.rooms;
-    } else if (json?.days && Object.keys(json.days).length === 1) {
-      const onlyKey = Object.keys(json.days)[0];
-      dayObj = json.days[onlyKey];
-      if (!dataset.rooms && Array.isArray(json.rooms)) dataset.rooms = json.rooms;
-    } else if (json?.roomsData) {
-      dayObj = json.roomsData;
-      if (!dataset.rooms && Array.isArray(json.rooms)) dataset.rooms = json.rooms;
-    } else {
+    if (!dayObj) {
       throw new Error(`Unbekanntes JSON-Format in ${f.name}`);
     }
 
+    if (!dataset.rooms && rooms) dataset.rooms = rooms;
     dataset.days[day] = dayObj;
   }
 
   dataset.meta.dayCount = Object.keys(dataset.days).length;
-
-  if (!dataset.rooms) {
-    const firstDay = Object.keys(dataset.days)[0];
-    dataset.rooms = Object.keys(dataset.days[firstDay] || {});
-  }
-
-  // falls einzelne Tage zusätzliche Räume haben
-  const roomSet = new Set(dataset.rooms);
-  for (const d of Object.keys(dataset.days)) {
-    for (const r of Object.keys(dataset.days[d] || {})) {
-      if (!roomSet.has(r)) { dataset.rooms.push(r); roomSet.add(r); }
-    }
-  }
+  finalizeRooms(dataset);
 
   return { dataset, matrix };
 }
@@ -97,27 +106,25 @@ export async function buildDatasetFromRepository() {
     if (!day) throw new Error(`Ungültiger Tages-Dateiname in dataset-index.json: ${fileName}`);
 
     const json = await readJsonUrl(`${dataRoot}${fileName}`);
+    const { dayObj, rooms } = extractDayData(json, day);
 
-    let dayObj = null;
-    if (json?.days?.[day]) {
-      dayObj = json.days[day];
-      if (!dataset.rooms && Array.isArray(json.rooms)) dataset.rooms = json.rooms;
-    } else if (json?.days && Object.keys(json.days).length === 1) {
-      const onlyKey = Object.keys(json.days)[0];
-      dayObj = json.days[onlyKey];
-      if (!dataset.rooms && Array.isArray(json.rooms)) dataset.rooms = json.rooms;
-    } else if (json?.roomsData) {
-      dayObj = json.roomsData;
-      if (!dataset.rooms && Array.isArray(json.rooms)) dataset.rooms = json.rooms;
-    } else {
+    if (!dayObj) {
+      // Warnung statt Abbruch bei Auto-Load, oder Fehler werfen:
       throw new Error(`Unbekanntes JSON-Format in ${fileName}`);
     }
 
+    if (!dataset.rooms && rooms) dataset.rooms = rooms;
     dataset.days[day] = dayObj;
   }
 
   dataset.meta.dayCount = Object.keys(dataset.days).length;
+  finalizeRooms(dataset);
 
+  return { dataset, matrix };
+}
+
+// Hilfsfunktion: Falls 'rooms' nicht in den JSONs war, aus den Keys sammeln
+function finalizeRooms(dataset) {
   if (!dataset.rooms) {
     const firstDay = Object.keys(dataset.days)[0];
     dataset.rooms = Object.keys(dataset.days[firstDay] || {});
@@ -129,6 +136,4 @@ export async function buildDatasetFromRepository() {
       if (!roomSet.has(r)) { dataset.rooms.push(r); roomSet.add(r); }
     }
   }
-
-  return { dataset, matrix };
 }
