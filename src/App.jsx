@@ -88,22 +88,28 @@ export default function App() {
 
   // Log-Handler für Perfectioning
   const handlePerfectioningLog = (data) => {
-    const row = buildLogRow({
-      userId,
-      scenarioId: `PERF|${Date.now()}`,
-      day: "SIMULATION",
-      mode: "PERFECTIONING",
-      horizonMin: data.featA.totalPlannedMin || 480,
-      accounts: 0,
-      choice: data.choice,
-      scoreA: 0,
-      scoreB: 0,
-      pChooseA: 0.5,
-      featA: data.featA,
-      featB: data.featB,
-      profile
-    });
-    setLogs((prev) => [...prev, row]);
+    try {
+      const row = buildLogRow({
+        userId,
+        scenarioId: `PERF|${Date.now()}`,
+        day: "SIMULATION",
+        mode: "PERFECTIONING",
+        horizonMin: data.featA.totalPlannedMin || 480,
+        accounts: 0,
+        choice: data.choice,
+        scoreA: 0,
+        scoreB: 0,
+        pChooseA: 0.5,
+        featA: data.featA,
+        featB: data.featB,
+        profile
+      });
+      setLogs((prev) => [...prev, row]);
+      console.log("Perfectioning Log added:", row); // Debugging
+    } catch (err) {
+      console.error("Fehler beim Speichern des Logs:", err);
+      alert("Fehler beim Speichern der Entscheidung. Bitte Console prüfen.");
+    }
   };
 
   // 3. Routing-Weichen
@@ -126,7 +132,7 @@ export default function App() {
     );
   }
 
-  // 4. Haupt-App Logik (gekürzt)
+  // 4. Haupt-App Logik
   if (isLoadingDataset && (!datasetState?.dataset || !datasetState?.matrix)) {
     return <main className="mx-auto min-h-screen max-w-6xl px-4 py-10 md:px-6"><div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">Trainingsdaten werden geladen …</div></main>;
   }
@@ -263,6 +269,8 @@ export default function App() {
   );
 }
 
+// --- Hilfsfunktionen ---
+
 function softmaxProb(a, b) {
   const ma = Math.max(a, b);
   const ea = Math.exp(a - ma);
@@ -276,38 +284,49 @@ function scoreFromWeights(w, f) {
   return s;
 }
 
+// --- SAFE VERSION VON BUILDLOGROW ---
+// Verhindert Abstürze bei alten Profilen ohne neue Felder
 function buildLogRow({ userId, scenarioId, day, mode, horizonMin, accounts, choice, scoreA, scoreB, pChooseA, featA, featB, profile }) {
-  const p = profile;
+  const p = profile || {}; // Fallback
+  const delayBuckets = p.delayByBucket || {};
+  const gapAnnoy = p.gapAnnoyance || {};
+  const riskTol = p.riskTolerance || {};
+  const switchAnnoy = p.switchAnnoyance || {};
+
   return {
     tsISO: nowISO(), userId, scenarioId, day, mode, horizonMin, accounts, choice,
-    scoreA: scoreA.toFixed(6), scoreB: scoreB.toFixed(6), pChooseA: pChooseA.toFixed(6),
-    A_distanceNorm: featA.distanceNorm.toFixed(6),
-    A_waitPenalty: featA.waitPenalty.toFixed(6),
-    A_switchPenalty: featA.switchPenalty.toFixed(6),
-    A_stabilityPenalty: featA.stabilityPenalty.toFixed(6),
-    A_productiveLossMin: featA.productiveLossMin.toFixed(3),
-    A_riskLateMin: featA.riskLateMin.toFixed(6),
-    A_totalPlannedMin: featA.totalPlannedMin,
-    A_totalCoveredMin: featA.totalCoveredMin,
-    B_distanceNorm: featB.distanceNorm.toFixed(6),
-    B_waitPenalty: featB.waitPenalty.toFixed(6),
-    B_switchPenalty: featB.switchPenalty.toFixed(6),
-    B_stabilityPenalty: featB.stabilityPenalty.toFixed(6),
-    B_productiveLossMin: featB.productiveLossMin.toFixed(3),
-    B_riskLateMin: featB.riskLateMin.toFixed(6),
-    B_totalPlannedMin: featB.totalPlannedMin,
-    B_totalCoveredMin: featB.totalCoveredMin,
-    prof_morningMean: p.delayByBucket.MORNING.meanMin,
-    prof_morningStd: p.delayByBucket.MORNING.stdMin,
-    prof_middayMean: p.delayByBucket.MIDDAY.meanMin,
-    prof_middayStd: p.delayByBucket.MIDDAY.stdMin,
-    prof_afternoonMean: p.delayByBucket.AFTERNOON.meanMin,
-    prof_afternoonStd: p.delayByBucket.AFTERNOON.stdMin,
-    prof_eveningMean: p.delayByBucket.EVENING.meanMin,
-    prof_eveningStd: p.delayByBucket.EVENING.stdMin,
-    prof_gapBrutalFrom: p.gapAnnoyance.shortBrutalFromMin,
-    prof_gapLongOkFrom: p.gapAnnoyance.longOkFromMin,
-    prof_checkinStressFrom: p.riskTolerance.lateCheckinBrutalFromMin,
-    prof_switchLossMin: p.switchAnnoyance.switchLossMin
+    scoreA: (scoreA || 0).toFixed(6), scoreB: (scoreB || 0).toFixed(6), pChooseA: (pChooseA || 0.5).toFixed(6),
+    
+    A_distanceNorm: (featA.distanceNorm || 0).toFixed(6),
+    A_waitPenalty: (featA.waitPenalty || 0).toFixed(6),
+    A_switchPenalty: (featA.switchPenalty || 0).toFixed(6),
+    A_stabilityPenalty: (featA.stabilityPenalty || 0).toFixed(6),
+    A_productiveLossMin: (featA.productiveLossMin || 0).toFixed(3),
+    A_riskLateMin: (featA.riskLateMin || 0).toFixed(6),
+    A_totalPlannedMin: featA.totalPlannedMin || 0,
+    A_totalCoveredMin: featA.totalCoveredMin || 0,
+
+    B_distanceNorm: (featB.distanceNorm || 0).toFixed(6),
+    B_waitPenalty: (featB.waitPenalty || 0).toFixed(6),
+    B_switchPenalty: (featB.switchPenalty || 0).toFixed(6),
+    B_stabilityPenalty: (featB.stabilityPenalty || 0).toFixed(6),
+    B_productiveLossMin: (featB.productiveLossMin || 0).toFixed(3),
+    B_riskLateMin: (featB.riskLateMin || 0).toFixed(6),
+    B_totalPlannedMin: featB.totalPlannedMin || 0,
+    B_totalCoveredMin: featB.totalCoveredMin || 0,
+
+    // Sichere Zugriffe auf Profile-Daten
+    prof_morningMean: delayBuckets.MORNING?.meanMin ?? 0,
+    prof_morningStd: delayBuckets.MORNING?.stdMin ?? 0,
+    prof_middayMean: delayBuckets.MIDDAY?.meanMin ?? 0,
+    prof_middayStd: delayBuckets.MIDDAY?.stdMin ?? 0,
+    prof_afternoonMean: delayBuckets.AFTERNOON?.meanMin ?? 0,
+    prof_afternoonStd: delayBuckets.AFTERNOON?.stdMin ?? 0,
+    prof_eveningMean: delayBuckets.EVENING?.meanMin ?? 0,
+    prof_eveningStd: delayBuckets.EVENING?.stdMin ?? 0,
+    prof_gapBrutalFrom: gapAnnoy.shortBrutalFromMin ?? 0,
+    prof_gapLongOkFrom: gapAnnoy.longOkFromMin ?? 0,
+    prof_checkinStressFrom: riskTol.lateCheckinBrutalFromMin ?? 0,
+    prof_switchLossMin: switchAnnoy.switchLossMin ?? 0
   };
 }
