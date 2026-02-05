@@ -1,0 +1,37 @@
+name: Sync Main to Gemini Branch
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Erlaubt es dir, den Prozess manuell zu starten
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync and Push
+        run: |
+          # Git Identität setzen
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Den Ordner node_modules löschen, falls er existiert
+          # (Normalerweise sollte dieser eh in der .gitignore stehen)
+          rm -rf node_modules
+
+          # Einen neuen Branch lokal erstellen oder zum bestehenden wechseln
+          git checkout -B for-gemini
+
+          # Änderungen stagen und committen
+          # Das "|| true" verhindert, dass die Action abbricht, wenn keine Änderungen da sind
+          git add .
+          git commit -m "Sync from main: excluding node_modules" || echo "Keine Änderungen zum Committen"
+
+          # Force-Push auf den Zielbranch
+          git push origin for-gemini --force
