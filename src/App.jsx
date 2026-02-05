@@ -1,16 +1,16 @@
 // srcApp.jsx
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
-import { listDays, buildDayIndexForDay } from "./src/engine/dayIndex.js"; // falls du srcApp.jsx im Root hast, Pfad anpassen
+import { listDays, buildDayIndexForDay } from "./engine/dayIndex.js"; // falls du srcApp.jsx im Root hast, Pfad anpassen
 // Wenn srcApp.jsx in src/ liegt, dann: "./engine/dayIndex.js"
-import { generateTwoStrategies } from "./src/engine/strategyBuilder.js";
-import { computeFeatures } from "./src/engine/features.js";
-import { initWeights, initOptState, updateWeightsAdam } from "./src/engine/trainer.js";
-import { defaultProfile } from "./src/engine/profiles.js";
-import { buildDatasetFromUploads } from "./src/engine/dataset.js";
+import { generateTwoStrategies } from "./engine/strategyBuilder.js";
+import { computeFeatures } from "./engine/features.js";
+import { initWeights, initOptState, updateWeightsAdam } from "./engine/trainer.js";
+import { defaultProfile } from "./engine/profiles.js";
+import { buildDatasetFromRepository, buildDatasetFromUploads } from "./engine/dataset.js";
 
-import { loadState, saveState, resetState, saveDataset, loadDataset, resetDataset } from "./src/utils/storage.js";
-import { downloadTextFile, toCsvRow } from "./src/utils/csv.js";
+import { loadState, saveState, resetState, saveDataset, loadDataset, resetDataset } from "./utils/storage.js";
+import { downloadTextFile, toCsvRow } from "./utils/csv.js";
 
 const SOFT_TARGET_QUESTIONS = 250;
 
@@ -248,6 +248,23 @@ function DatasetUploader({ onLoaded, onReset }) {
   const [dayFiles, setDayFiles] = useState([]);
   const [matrixFile, setMatrixFile] = useState(null);
   const [status, setStatus] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        setStatus("Lade Dataset aus GitHub...");
+        const { dataset, matrix } = await buildDatasetFromRepository();
+        if (!active) return;
+        setStatus(`OK: ${Object.keys(dataset.days).length} Tage, ${dataset.rooms.length} Räume`);
+        onLoaded(dataset, matrix);
+      } catch {
+        if (!active) return;
+        setStatus("");
+      }
+    })();
+    return () => { active = false; };
+  }, [onLoaded]);
 
   async function onLoad() {
     setStatus("Lade JSONs...");
