@@ -50,15 +50,38 @@ export default function AdvancedAnalysisPage() {
       anchor.remove();
   };
 
-  const downloadPythonWeights = () => {
-      if(!result || !result.pythonConfig) return;
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(result.pythonConfig, null, 2));
-      const anchor = document.createElement('a');
-      anchor.setAttribute("href", dataStr);
-      anchor.setAttribute("download", "weights.json");
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
+const downloadPythonWeights = () => {
+      // 1. Prüfen, ob Ergebnisse da sind
+      if (!result) {
+          alert("Fehler: Keine Analyse-Ergebnisse vorhanden.");
+          return;
+      }
+
+      // 2. Prüfen, ob die Python-Config generiert wurde
+      if (!result.pythonConfig) {
+          console.error("Ergebnis-Objekt:", result); // Zum Debuggen in F12 schauen
+          alert("Fehler: Die 'pythonConfig' fehlt in den Ergebnissen.\n\nHast du die Datei 'src/engine/advancedAnalysis.js' aktualisiert und die Analyse danach NEU gestartet?");
+          return;
+      }
+
+      try {
+          // 3. Sicherer Download via Blob (besser als Data-URI)
+          const jsonString = JSON.stringify(result.pythonConfig, null, 2);
+          const blob = new Blob([jsonString], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = "weights.json";
+          document.body.appendChild(anchor);
+          anchor.click();
+          
+          // Aufräumen
+          document.body.removeChild(anchor);
+          URL.revokeObjectURL(url);
+      } catch (err) {
+          alert("Download fehlgeschlagen: " + err.message);
+      }
   };
 
   return (
