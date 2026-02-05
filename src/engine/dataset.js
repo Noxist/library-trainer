@@ -1,7 +1,6 @@
 // src/engine/dataset.js
 
 export function parseDayFromFilename(filename) {
-  // Erlaubt Formate wie "2026-01-02_ml.json"
   const m = filename.match(/^(\d{4}-\d{2}-\d{2})_ml\.json$/);
   return m ? m[1] : null;
 }
@@ -18,8 +17,8 @@ export async function readJsonUrl(url) {
 }
 
 /**
- * Hilfsfunktion: Versucht intelligent, die Tagesdaten und Räume aus verschiedenen
- * JSON-Strukturen zu extrahieren.
+ * Wandelt verschiedene JSON-Formate in das von der Engine benötigte Format um.
+ * WICHTIG: Erzeugt die Struktur { slots: ... } falls diese fehlt.
  */
 function extractDayData(json, day) {
   let dayObj = null;
@@ -27,7 +26,14 @@ function extractDayData(json, day) {
 
   // FORMAT 1: Deine neue Struktur (json.data.slots)
   if (json?.data?.slots) {
-    dayObj = json.data.slots;
+    const rawSlots = json.data.slots;
+    dayObj = {};
+    
+    // Konvertierung: Fügt die fehlende "slots"-Ebene hinzu
+    for (const [roomName, times] of Object.entries(rawSlots)) {
+      dayObj[roomName] = { slots: times };
+    }
+
     if (Array.isArray(json.data.rooms)) rooms = json.data.rooms;
   }
   // FORMAT 2: Alte Struktur mit "days"-Objekt
@@ -50,45 +56,26 @@ function extractDayData(json, day) {
   return { dayObj, rooms };
 }
 
-/**
- * Validiert und bereinigt das erstellte Dataset
- */
 function finalizeDataset(dataset) {
-  // Metadata update
   dataset.meta.dayCount = Object.keys(dataset.days).length;
 
-  // Falls keine Räume gefunden wurden, nimm die Keys vom ersten Tag
   if (!dataset.rooms) {
     const firstDay = Object.keys(dataset.days)[0];
-    if (firstDay) {
-      dataset.rooms = Object.keys(dataset.days[firstDay] || {});
-    } else {
-      dataset.rooms = [];
-    }
+    dataset.rooms = firstDay ? Object.keys(dataset.days[firstDay] || {}) : [];
   }
 
-  // Sicherstellen, dass alle Räume, die in den Tagen vorkommen, auch in der Liste sind
+  // Sammle alle Räume aus allen Tagen
   const roomSet = new Set(dataset.rooms);
   for (const d of Object.keys(dataset.days)) {
     for (const r of Object.keys(dataset.days[d] || {})) {
-      if (!roomSet.has(r)) {
-        dataset.rooms.push(r);
-        roomSet.add(r);
-      }
+      if (!roomSet.has(r)) { dataset.rooms.push(r); roomSet.add(r); }
     }
   }
 }
 
-// --- Hauptfunktionen ---
-
 export async function buildDatasetFromUploads(dayFiles, matrixFile) {
   if (!matrixFile) throw new Error("Matrix fehlt: roomDistanceMatrix.json");
   if (!dayFiles || dayFiles.length === 0) throw new Error("Keine Tages-JSONs hochgeladen");
-
-  // Toleranterer Name-Check (optional)
-  if (!matrixFile.name.includes("Matrix") && matrixFile.name !== "roomDistanceMatrix.json") {
-     console.warn(`Matrix-Dateiname ungewöhnlich: ${matrixFile.name}`);
-  }
 
   const matrix = await readJsonFile(matrixFile);
 
@@ -100,15 +87,13 @@ export async function buildDatasetFromUploads(dayFiles, matrixFile) {
 
   for (const f of dayFiles) {
     const day = parseDayFromFilename(f.name);
-    if (!day) throw new Error(`Ungültiger Tages-Dateiname: ${f.name} (erwartet YYYY-MM-DD_ml.json)`);
+    if (!day) throw new Error(`Ungültiger Tages-Dateiname: ${f.name}`);
 
     const json = await readJsonFile(f);
     const { dayObj, rooms } = extractDayData(json, day);
 
-    if (!dayObj) {
-      throw new Error(`Unbekanntes JSON-Format in ${f.name}`);
-    }
-
+    if (!dayObj) throw new Error(`Unbekanntes JSON-Format in ${f.name}`);
+    
     if (!dataset.rooms && rooms) dataset.rooms = rooms;
     dataset.days[day] = dayObj;
   }
@@ -118,9 +103,7 @@ export async function buildDatasetFromUploads(dayFiles, matrixFile) {
 }
 
 export async function buildDatasetFromRepository() {
-  // Nutzt BASE_URL für korrekte Pfade auf GitHub Pages
   const base = import.meta.env.BASE_URL || "/";
-  // Wichtig: kein doppelter Slash, falls BASE_URL mit / endet
   const cleanBase = base.endsWith("/") ? base : `${base}/`;
   const dataRoot = `${cleanBase}data/`;
 
@@ -128,7 +111,7 @@ export async function buildDatasetFromRepository() {
   const dayFiles = Array.isArray(index?.dayFiles) ? index.dayFiles : [];
   const matrixFile = index?.matrixFile || "roomDistanceMatrix.json";
 
-  if (!dayFiles.length) throw new Error("Keine dayFiles in data/dataset-index.json gefunden");
+  if (!dayFiles.length) throw new Error("Keine dayFiles in dataset-index.json gefunden");
 
   const matrix = await readJsonUrl(`${dataRoot}${matrixFile}`);
 
@@ -141,7 +124,7 @@ export async function buildDatasetFromRepository() {
   for (const fileName of dayFiles) {
     const day = parseDayFromFilename(fileName);
     if (!day) {
-      console.warn(`Überspringe Datei mit ungültigem Namen: ${fileName}`);
+      console.warn(`Überspringe ungültigen Dateinamen: ${fileName}`);
       continue;
     }
 
@@ -152,8 +135,6 @@ export async function buildDatasetFromRepository() {
       if (dayObj) {
         dataset.days[day] = dayObj;
         if (!dataset.rooms && rooms) dataset.rooms = rooms;
-      } else {
-        console.warn(`Konnte Daten in ${fileName} nicht lesen (Format unbekannt).`);
       }
     } catch (e) {
       console.warn(`Fehler beim Laden von ${fileName}:`, e);
