@@ -10,6 +10,15 @@ import { buildDatasetFromRepository, buildDatasetFromUploads } from "./engine/da
 
 import { loadState, saveState, resetState, saveDataset, loadDataset, resetDataset } from "./utils/storage.js";
 import { downloadTextFile, toCsvRow } from "./utils/csv.js";
+import { selectTrainingHorizon } from "./engine/selectTrainingHorizon.js";
+import { generateStrategies } from "./engine/strategyGenerator.js";
+
+const horizonHours = selectTrainingHorizon(roundIndex);
+
+const { A, B } = generateStrategies({ horizonHours });
+
+// A.walkMeters → Engine-Wahrheit
+// normalize(A.walkMeters, 600) → UI-Übersetzung
 
 const SOFT_TARGET_QUESTIONS = 250;
 
