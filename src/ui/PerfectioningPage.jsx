@@ -2,29 +2,26 @@ import React, { useState } from "react";
 import { getNextPerfectionCase, featuresToStrategyDisplay } from "../engine/perfectioningGenerator.js";
 import { updateWeightsAdam } from "../engine/trainer.js";
 import DecisionCard from "./DecisionCard.jsx";
-import ProgressBar from "./ProgressBar.jsx"; // Falls du keinen hast, simple HTML progress nehmen
 
-// Wir speichern das Perfectioning im "HUSTLE" Modell (oder einem separaten, hier HUSTLE als Default)
 const TARGET_MODE = "HUSTLE"; 
 const TOTAL_ROUNDS = 20;
 
-export default function PerfectioningPage({ modelState, setModelState, userId, onBack }) {
+export default function PerfectioningPage({ modelState, setModelState, userId, onBack, onLog }) {
   const [round, setRound] = useState(0);
-  // Initialen Case laden
   const [currentCase, setCurrentCase] = useState(() => getNextPerfectionCase(0));
 
   const stratA = featuresToStrategyDisplay(currentCase.featA);
   const stratB = featuresToStrategyDisplay(currentCase.featB);
 
   const handleChoice = (choice) => {
-    // 1. Trainieren (mit höherer Learning Rate, da diese Daten "Gold" sind)
+    // 1. Trainieren
     const upd = updateWeightsAdam({
       weights: modelState[TARGET_MODE].weights,
       opt: modelState[TARGET_MODE].opt,
       featA: currentCase.featA,
       featB: currentCase.featB,
       choice,
-      lr: 0.1, // Aggressiveres Lernen!
+      lr: 0.1, 
       l2: 0.001
     });
 
@@ -32,6 +29,15 @@ export default function PerfectioningPage({ modelState, setModelState, userId, o
       ...prev,
       [TARGET_MODE]: { weights: upd.weights, opt: upd.opt }
     }));
+
+    // In die CSV-Logs schreiben
+    if (onLog) {
+      onLog({
+        choice,
+        featA: currentCase.featA,
+        featB: currentCase.featB
+      });
+    }
 
     // 2. Nächste Runde
     if (round + 1 < TOTAL_ROUNDS) {
@@ -47,7 +53,6 @@ export default function PerfectioningPage({ modelState, setModelState, userId, o
     <div className="min-h-screen bg-slate-50 px-4 py-8 md:px-8">
       <div className="mx-auto max-w-6xl space-y-6">
         
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
@@ -63,7 +68,6 @@ export default function PerfectioningPage({ modelState, setModelState, userId, o
           </button>
         </div>
 
-        {/* Progress */}
         <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
           <div 
             className="h-full bg-indigo-600 transition-all duration-300" 
@@ -71,7 +75,6 @@ export default function PerfectioningPage({ modelState, setModelState, userId, o
           ></div>
         </div>
 
-        {/* Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
           <div className="relative group">
             <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-2xl opacity-50 group-hover:opacity-100 transition duration-200"></div>
@@ -83,9 +86,6 @@ export default function PerfectioningPage({ modelState, setModelState, userId, o
                  onChoose={() => handleChoice("A")}
                  disabled={false}
                />
-               <div className="mt-2 text-center text-xs text-slate-400 font-mono">
-                 {JSON.stringify(currentCase.featA, (k,v) => typeof v === 'number' && v!==0 ? Number(v.toFixed(2)) : v, 0).replace(/["{}]/g, '').slice(0, 50)}...
-               </div>
             </div>
           </div>
 
@@ -99,9 +99,6 @@ export default function PerfectioningPage({ modelState, setModelState, userId, o
                   onChoose={() => handleChoice("B")} 
                   disabled={false}
                 />
-                <div className="mt-2 text-center text-xs text-slate-400 font-mono">
-                 {JSON.stringify(currentCase.featB, (k,v) => typeof v === 'number' && v!==0 ? Number(v.toFixed(2)) : v, 0).replace(/["{}]/g, '').slice(0, 50)}...
-               </div>
              </div>
           </div>
         </div>
