@@ -1,8 +1,7 @@
-// srcApp.jsx
+// src/App.jsx
 import React, { useEffect, useMemo, useState } from "react";
 
-import { listDays, buildDayIndexForDay } from "./engine/dayIndex.js"; // falls du srcApp.jsx im Root hast, Pfad anpassen
-// Wenn srcApp.jsx in src/ liegt, dann: "./engine/dayIndex.js"
+import { listDays, buildDayIndexForDay } from "./engine/dayIndex.js";
 import { generateTwoStrategies } from "./engine/strategyBuilder.js";
 import { computeFeatures } from "./engine/features.js";
 import { initWeights, initOptState, updateWeightsAdam } from "./engine/trainer.js";
@@ -17,10 +16,8 @@ const SOFT_TARGET_QUESTIONS = 250;
 const CSV_HEADER = [
   "tsISO","userId","scenarioId","day","mode","horizonMin","accounts",
   "choice","scoreA","scoreB","pChooseA",
-
   "A_distanceNorm","A_waitPenalty","A_switchPenalty","A_stabilityPenalty","A_productiveLossMin","A_riskLateMin","A_totalPlannedMin","A_totalCoveredMin",
   "B_distanceNorm","B_waitPenalty","B_switchPenalty","B_stabilityPenalty","B_productiveLossMin","B_riskLateMin","B_totalPlannedMin","B_totalCoveredMin",
-
   "prof_morningMean","prof_morningStd","prof_middayMean","prof_middayStd","prof_afternoonMean","prof_afternoonStd","prof_eveningMean","prof_eveningStd",
   "prof_gapBrutalFrom","prof_gapLongOkFrom","prof_checkinStressFrom","prof_switchLossMin"
 ];
@@ -32,7 +29,7 @@ function scenarioIdOf(day, mode, horizonMin, n) {
   return `${day}|${mode}|${horizonMin}|${n}`;
 }
 
-export default function srcApp() {
+export default function App() {
   const persisted = loadState();
   const persistedDataset = loadDataset();
 
@@ -56,7 +53,7 @@ export default function srcApp() {
     return persistedDataset ?? null; // { dataset, matrix }
   });
 
-  // Persist main state (nicht Dataset, das separat gespeichert wird)
+  // Persist main state
   useMemo(() => {
     saveState({ userId, mode, horizonMin, accounts, profile, modelState, logs, round });
   }, [userId, mode, horizonMin, accounts, profile, modelState, logs, round]);
@@ -84,42 +81,42 @@ export default function srcApp() {
   const dataset = datasetState.dataset;
   const matrix = datasetState.matrix;
 
-// --- FIX: Sicherung gegen Absturz bei defekten Daten ---
+  // --- SICHERHEITS-BLOCK: Verhindert Abstürze bei fehlerhaften Daten ---
   let allDays = [];
+  let dayIndex = null;
+  let day = null;
+  let errorMsg = null;
+
   try {
     allDays = listDays(dataset);
+    day = allDays.length ? allDays[round % allDays.length] : null;
+    if (day) {
+      dayIndex = buildDayIndexForDay(dataset, day);
+    }
   } catch (e) {
-    console.error("Fehler beim Lesen der Tage:", e);
-    // Fallback: Dataset resetten erzwingen, wenn es kaputt ist
+    console.error("Critical Dataset Error:", e);
+    errorMsg = e.message;
   }
 
-  const day = allDays.length ? allDays[round % allDays.length] : null;
-
-  const dayIndex = useMemo(() => {
-    if (!day) return null;
-    try {
-      return buildDayIndexForDay(dataset, day);
-    } catch (e) {
-      console.error(`Fehler bei Tag ${day}:`, e);
-      return null;
-    }
-  }, [dataset, day]);
-
-  // Wenn Daten korrupt sind, UI resetten statt Absturz
-  if (dataset && (!allDays.length || !dayIndex)) {
+  if (errorMsg || !dayIndex) {
     return (
-      <div style={{ padding: 20, fontFamily: "system-ui", color: "red" }}>
-        <h3>Fehler im geladenen Dataset</h3>
-        <p>Die Daten scheinen beschädigt oder inkompatibel zu sein.</p>
-        <button onClick={() => { resetDataset(); setDatasetState(null); window.location.reload(); }}>
+      <div style={{ padding: 20, fontFamily: "system-ui", color: "#d32f2f", border: "2px solid #d32f2f", borderRadius: 8, margin: 20 }}>
+        <h3>Fehler beim Laden der Tages-Daten</h3>
+        <p>Das Dataset scheint beschädigt oder inkompatibel zu sein.</p>
+        <pre style={{ background: "#eee", padding: 10 }}>{errorMsg || "Unbekannter Fehler beim Indizieren des Tages."}</pre>
+        <button 
+          onClick={() => { resetDataset(); setDatasetState(null); window.location.reload(); }}
+          style={{ marginTop: 10, padding: 10, cursor: "pointer" }}
+        >
           Dataset zurücksetzen & neu laden
         </button>
       </div>
     );
   }
-  // --- ENDE FIX ---
+  // --- ENDE SICHERHEITS-BLOCK ---
 
-  const scenarioId = useMemo(() => scenarioIdOf(day, mode, horizonMin, round), [day, mode, horizonMin, round]);
+  const scenarioId = scenarioIdOf(day, mode, horizonMin, round);
+
   const { strategyA, strategyB } = useMemo(() => {
     return generateTwoStrategies({
       dayIndex,
@@ -273,6 +270,8 @@ export default function srcApp() {
     </div>
   );
 }
+
+// --- Sub-Komponenten (unverändert, aber nötig für vollständige Datei) ---
 
 function DatasetUploader({ onLoaded, onReset }) {
   const [dayFiles, setDayFiles] = useState([]);
@@ -511,4 +510,3 @@ function buildLogRow({ userId, scenarioId, day, mode, horizonMin, accounts, choi
     prof_switchLossMin: p.switchAnnoyance.switchLossMin
   };
 }
-
