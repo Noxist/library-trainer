@@ -1,0 +1,8 @@
+{
+  "totalCoveredMin": 0.0141,
+  "waitPenalty": -1.453,
+  "switchBonus": 1.021,
+  "stabilityBonus": 9.352,
+  "productiveLossMin": -0.118,
+  "favoriteBonus": 50.0
+}
