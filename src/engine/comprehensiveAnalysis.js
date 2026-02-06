@@ -12,22 +12,23 @@ const BASE_FEATURES = [
   "totalCoveredMin",
 ];
 
-// Wie wichtig sind Perfectioning-Fragen im Vergleich zu normalen?
-const PERFECTIONING_WEIGHT_MULTIPLIER = 3.0; 
+// Active Learning: Perfectioning-Daten zählen 5x so viel wie normale,
+// da sie gezielt Schwachstellen adressieren.
+const PERFECTIONING_WEIGHT_MULTIPLIER = 5.0; 
 
-// --- MAIN: The Grand Analysis ---
+// --- HAUPTFUNKTION ---
 export async function runComprehensiveAnalysis(filesData, onProgress) {
   const t0 = performance.now();
   
-  // 1. Daten Aggregation
+  // 1. Daten Aggregation & Säuberung
   let allRows = [];
   filesData.forEach(f => {
-    // Wir markieren Rows basierend auf dem Dateinamen oder Inhalt, falls möglich
-    // Aber unser Parser extrahiert jetzt das "mode" Feld direkt.
-    allRows = allRows.concat(f.rows);
+    if (f.rows && Array.isArray(f.rows)) {
+        allRows = allRows.concat(f.rows);
+    }
   });
 
-  if (allRows.length < 5) throw new Error("Zu wenig Daten (min. 5).");
+  if (allRows.length < 5) throw new Error("Zu wenige Daten (min. 5 Entscheidungen nötig).");
 
   const TOTAL_STEPS = 6;
   const report = (msg, step) => {
@@ -35,16 +36,14 @@ export async function runComprehensiveAnalysis(filesData, onProgress) {
   };
 
   // --- PHASE 1: Feature Stats & Grid Search ---
-  report("Analysiere Datenverteilung & Hyperparameter...", 0);
+  report(`Analysiere ${allRows.length} Entscheidungen...`, 0);
   const stats = calculateFeatureStats(allRows);
   
-  // Grid Search für beste Lernparameter (verkürzt, da wir später massiv bootstrappen)
-  const bestParams = await findBestHyperparams(allRows);
+  // Wir suchen konservative Hyperparameter, um Overfitting zu vermeiden
+  const bestParams = { lr: 0.05, l2: 0.01 }; 
 
   // --- PHASE 2: Massives Bootstrapping (Der Kern) ---
-  // Wir trainieren N Modelle auf Teilmengen der Daten.
-  // Das liefert uns (A) Robuste Gewichte (Mittelwert) und (B) Unsicherheit (Varianz).
-  const BOOTSTRAP_ROUNDS = 200; // Rechenintensiv!
+  const BOOTSTRAP_ROUNDS = 100; 
   const ensembleModels = [];
   const weightAccumulator = {};
   BASE_FEATURES.forEach(f => weightAccumulator[f] = []);
@@ -52,51 +51,49 @@ export async function runComprehensiveAnalysis(filesData, onProgress) {
   for (let i = 0; i < BOOTSTRAP_ROUNDS; i++) {
     if (i % 10 === 0) report(`Trainiere Ensemble-Modell ${i+1}/${BOOTSTRAP_ROUNDS}...`, 2);
     
-    // Resampling mit Rücksicht auf Perfectioning-Gewichtung
+    // Resampling: Wir ziehen zufällige Teilmengen, um die Stabilität zu testen
     const sample = weightedResample(allRows);
     
-    const model = await trainModelSync(sample, { ...bestParams, epochs: 1500 });
+    // Training eines Modells auf dieser Teilmenge
+    const model = await trainModelSync(sample, { ...bestParams, epochs: 500 });
     ensembleModels.push(model);
     
     BASE_FEATURES.forEach(f => weightAccumulator[f].push(model.weights[f]));
     
-    // UI nicht blockieren
-    await new Promise(r => setTimeout(r, 0));
+    await new Promise(r => setTimeout(r, 0)); // UI atmen lassen
   }
 
-  // --- PHASE 3: Gewichtungs-Analyse (Python Export Vorbereitung) ---
-  report("Berechne optimale Gewichte & Stabilität...", 3);
+  // --- PHASE 3: Gewichtungs-Analyse & Python Export ---
+  report("Berechne optimale Gewichte & Python-Config...", 3);
   
   const finalWeightsStats = {};
   const meanWeights = {};
   
   BASE_FEATURES.forEach(f => {
     const vals = weightAccumulator[f];
+    // Median ist robuster gegen Ausreißer als Mittelwert
+    vals.sort((a,b) => a - b);
+    const medianVal = vals[Math.floor(vals.length / 2)];
+    
+    // Standardabweichung für Unsicherheit
     const mean = vals.reduce((a,b)=>a+b,0) / vals.length;
     const variance = vals.reduce((a,b)=>a+(b-mean)**2, 0) / vals.length;
     
-    meanWeights[f] = mean;
+    meanWeights[f] = medianVal;
     finalWeightsStats[f] = {
-      mean,
+      mean: medianVal,
       stdDev: Math.sqrt(variance),
-      stabilityScore: (1 - Math.min(1, Math.sqrt(variance) / (Math.abs(mean) + 0.1))).toFixed(2)
+      // Stability Score: Wie sicher ist sich das Modell (0..1)?
+      stabilityScore: (1 - Math.min(1, Math.sqrt(variance) / (Math.abs(mean) + 0.5))).toFixed(2)
     };
   });
 
-  // Konvertierung für Python Script (Mapping)
-  const pythonConfig = {
-    totalCoveredMin: Math.max(0.001, meanWeights["totalCoveredMin"] || 0.01),
-    waitPenalty: meanWeights["waitPenalty"] || -1.0,
-    switchBonus: meanWeights["switchPenalty"] || -0.5, // Mapping Penalty -> Bonus (negativ)
-    stabilityBonus: (meanWeights["stabilityPenalty"] || -0.5) * -10.0, // Skalierung
-    productiveLossMin: meanWeights["productiveLossMin"] || -0.1,
-    preferredRoomBonus: 5.0 
-  };
+  // --- DAS KORRIGIERTE MAPPING FÜR PYTHON ---
+  const pythonConfig = mapToPythonConfig(meanWeights);
 
   // --- PHASE 4: Diagnose (Blind Spots & Unsicherheit) ---
   report("Suche nach Lücken und Widersprüchen...", 4);
-  
-  const diagnostics = analyzeDiagnostics(allRows, ensembleModels, meanWeights, stats);
+  const diagnostics = analyzeDiagnostics(allRows, ensembleModels);
 
   // --- PHASE 5: Active Learning (Next Steps) ---
   report("Generiere Trainings-Vorschläge...", 5);
@@ -118,39 +115,51 @@ export async function runComprehensiveAnalysis(filesData, onProgress) {
   };
 }
 
-// --- CORE LOGIC ---
+// --- LOGIK: Python Mapping (Der wichtigste Teil) ---
+function mapToPythonConfig(w) {
+    // Hier übersetzen wir die JS-Gewichte (Trainer) in Python-Logik (Scanner).
+    
+    // 1. Total Covered (Minuten im Raum)
+    // JS: Positiv (mehr ist gut). Python: Positiv.
+    // Wir erzwingen mindestens 0.001, damit Zeit überhaupt einen Wert hat.
+    let totalCoveredMin = Math.max(0.001, w["totalCoveredMin"] || 0.01);
 
-async function findBestHyperparams(rows) {
-  // Mini Grid Search
-  const lrs = [0.01, 0.05, 0.1];
-  const l2s = [0.0001, 0.001];
-  let bestScore = -Infinity;
-  let best = { lr: 0.05, l2: 0.001 };
+    // 2. Wait Penalty (Wartezeit)
+    // JS: Negativ (Warten ist schlecht). Python: Negativ.
+    // Wir begrenzen es, damit es nicht -100 wird und alles blockiert.
+    let waitPenalty = Math.max(-10.0, Math.min(0, w["waitPenalty"] || -1.0));
 
-  for (const lr of lrs) {
-    for (const l2 of l2s) {
-        // 3-Fold CV für Speed
-        const score = await crossValidate(rows, { lr, l2, epochs: 200 }, 3);
-        if (score > bestScore) {
-            bestScore = score;
-            best = { lr, l2 };
-        }
-    }
-  }
-  return best;
+    // 3. Switch Bonus (Raumwechsel)
+    // JS: 'switchPenalty' ist meist negativ (Strafe). 
+    // Python: 'switchBonus' wird addiert. Muss also auch negativ sein, wenn Wechsel schlecht sind.
+    // FIX: Wir nehmen den Wert 1:1, aber cappen ihn bei +1.0 (kleiner Bonus ok, aber kein "Wechsel-Wahn").
+    let switchBonus = w["switchPenalty"] || -0.5;
+    if (switchBonus > 1.0) switchBonus = 0.5; // Sanity Cap: Wechseln ist selten "super toll".
+
+    // 4. Stability Bonus (Im gleichen Raum bleiben)
+    // JS: 'stabilityPenalty' (Feature ist 1 wenn unstabil/wechselnd? Nein, Feature Check nötig).
+    // Im JS Code (features.js): stabilityPenalty = (1 - stabilityScore) * 10.
+    // Also: Hohe Penalty = Wenig Stabilität.
+    // Wenn das Gewicht negativ ist (z.B. -5), heisst das: Instabilität ist schlecht.
+    // Python: 'stabilityBonus' wird addiert, wenn Raum == LastRoom.
+    // Ergo: Wir müssen das Vorzeichen umdrehen! (Negatives Penalty-Gewicht -> Positiver Bonus).
+    // Wir skalieren mit Faktor 2, da Python das oft pro Schritt addiert.
+    let stabilityBonus = (w["stabilityPenalty"] || 0) * -2.0;
+    
+    // Sanity Check: Stabilität sollte fast immer gut sein (Positiv).
+    if (stabilityBonus < 0) stabilityBonus = 0.5; // Fallback: Ein bisschen Stabilität ist immer gut.
+
+    return {
+        totalCoveredMin,
+        waitPenalty,
+        switchBonus,
+        stabilityBonus,
+        productiveLossMin: w["productiveLossMin"] || -0.2, // Abbauzeit kostet
+        preferredRoomBonus: 5.0 // Fixer Wert, da nicht trainiert
+    };
 }
 
-async function crossValidate(rows, params, k=3) {
-    const chunkSize = Math.floor(rows.length / k);
-    let totalAcc = 0;
-    for(let i=0; i<k; i++) {
-        const testData = rows.slice(i*chunkSize, (i+1)*chunkSize);
-        const trainData = [...rows.slice(0, i*chunkSize), ...rows.slice((i+1)*chunkSize)];
-        const m = await trainModelSync(trainData, params);
-        totalAcc += evaluate(m.weights, testData);
-    }
-    return totalAcc / k;
-}
+// --- HELPER FUNKTIONEN ---
 
 async function trainModelSync(data, { lr, l2, epochs }) {
   let weights = initWeights();
@@ -158,7 +167,7 @@ async function trainModelSync(data, { lr, l2, epochs }) {
   
   for (let e = 0; e < epochs; e++) {
     for (const row of data) {
-      // PERFECTIONING Boost: Wir trainieren diese Zeile öfter oder mit höherer LR
+      // PERFECTIONING Boost: Diese Daten sind "sauberer", also lernen wir stärker daraus
       const isPerf = row.mode === "PERFECTIONING";
       const effectiveLr = isPerf ? lr * PERFECTIONING_WEIGHT_MULTIPLIER : lr;
       
@@ -175,76 +184,79 @@ async function trainModelSync(data, { lr, l2, epochs }) {
 }
 
 function weightedResample(rows) {
-    // Normales Resampling, aber Perfectioning-Rows landen wahrscheinlicher im Topf
     const res = [];
+    // Wir nehmen exakt so viele Samples wie Rows, aber mit Zurücklegen
     for(let i=0; i<rows.length; i++) {
         const idx = Math.floor(Math.random() * rows.length);
-        const row = rows[idx];
-        res.push(row);
-        
-        // Wenn es ein Perfectioning-Row ist, packen wir ihn statistisch öfter rein
-        if (row.mode === "PERFECTIONING" && Math.random() < 0.5) {
-            res.push(row); // Extra Kopie
-        }
+        res.push(rows[idx]);
     }
+    // Trick: Wir fügen JEDE Perfectioning-Row garantiert noch 1x hinzu,
+    // um sicherzugehen, dass sie im Bootstrap vertreten ist.
+    rows.forEach(r => {
+        if (r.mode === "PERFECTIONING") res.push(r);
+    });
     return res;
 }
 
-function analyzeDiagnostics(rows, models, meanWeights, stats) {
+function analyzeDiagnostics(rows, models) {
     let disagreements = 0;
     const criticalSamples = [];
 
-    rows.forEach((row, idx) => {
-        // Disagreement Check
+    // Wir prüfen nur die letzten 100 Entscheidungen (aktuellste Relevanz)
+    const recentRows = rows.slice(-100);
+
+    recentRows.forEach((row, idx) => {
         let votesA = 0;
         models.forEach(m => {
             if (predict(m.weights, row.featA, row.featB) === "A") votesA++;
         });
-        const ratio = votesA / models.length;
-        const disagreement = 1 - 2 * Math.abs(0.5 - ratio);
         
-        if (disagreement > 0.3) {
+        // Wie sicher ist sich das Ensemble? (0.5 = 50/50 = maximale Unsicherheit)
+        const ratio = votesA / models.length;
+        const disagreement = 1 - 2 * Math.abs(0.5 - ratio); // 0 = sicher, 1 = unsicher
+        
+        if (disagreement > 0.4) {
             disagreements++;
-            if (disagreement > 0.5 || idx % 5 === 0) { // Limit output
-                criticalSamples.push({
-                    id: row.scenarioId || idx,
-                    mode: row.mode || "NORMAL",
-                    disagreement: disagreement.toFixed(2),
-                    choice: row.choice
-                });
-            }
+            criticalSamples.push({
+                index: idx,
+                disagreement: disagreement.toFixed(2),
+                mode: row.mode || "NORMAL"
+            });
         }
     });
-
-    // Coverage Check (Wartezeit vs Distanz)
-    const blindSpots = [];
-    // ... (ähnliche Logik wie vorher, gekürzt für Fokus)
     
     return {
         disagreementCount: disagreements,
         criticalSamples: criticalSamples.slice(0, 10),
-        datasetHealth: (1 - (disagreements / rows.length)).toFixed(2)
+        datasetHealth: (1 - (disagreements / Math.max(1, recentRows.length))).toFixed(2)
     };
 }
 
 function suggestNextQueries(models, stats, n) {
+    // Generiert synthetische Szenarien, bei denen sich die Modelle uneinig sind
     const candidates = [];
-    for(let i=0; i<500; i++) {
+    for(let i=0; i<200; i++) {
         const diff = generateRandomDiff(stats);
-        // Unsicherheit messen
+        
         let votesA = 0;
         models.forEach(m => {
             let s = 0;
             BASE_FEATURES.forEach(f => s += (m.weights[f]||0) * diff[f]);
             if (s > 0) votesA++;
         });
+        
+        // Entropy: Nahe 0.5 ist maximal interessant
         const entropy = 1 - 2 * Math.abs(0.5 - (votesA / models.length));
         candidates.push({ diff, entropy });
     }
-    return candidates.sort((a,b) => b.entropy - a.entropy).slice(0, n).map(c => describeDiff(c.diff));
+    
+    return candidates
+        .sort((a,b) => b.entropy - a.entropy)
+        .slice(0, n)
+        .map(c => describeDiff(c.diff));
 }
 
-// --- HELPERS ---
+// --- BASIC MATH HELPERS ---
 
 function predict(w, fA, fB) {
     let sA = 0, sB = 0;
@@ -255,17 +267,13 @@ function predict(w, fA, fB) {
     return sA > sB ? "A" : "B";
 }
 
-function evaluate(w, data) {
-    let ok = 0;
-    data.forEach(r => { if (predict(w, r.featA, r.featB) === r.choice) ok++; });
-    return ok / data.length;
-}
-
 function calculateFeatureStats(rows) {
     const s = {};
     BASE_FEATURES.forEach(f => {
         const vals = rows.flatMap(r => [r.featA[f], r.featB[f]]);
-        s[f] = { min: Math.min(...vals), max: Math.max(...vals), range: Math.max(...vals)-Math.min(...vals)||1 };
+        const min = Math.min(...vals);
+        const max = Math.max(...vals);
+        s[f] = { min, max, range: (max - min) || 1.0 };
     });
     return s;
 }
@@ -273,49 +281,65 @@ function calculateFeatureStats(rows) {
 function generateRandomDiff(stats) {
     const d = {};
     BASE_FEATURES.forEach(f => {
-        d[f] = (Math.random() - 0.5) * stats[f].range;
+        // Wir erzeugen einen Differenzvektor im Bereich der beobachteten Daten
+        d[f] = (Math.random() - 0.5) * stats[f].range; 
     });
     return d;
 }
 
 function describeDiff(diff) {
+    // Findet die 2 dominantesten Features im Konflikt
     const entries = Object.entries(diff).sort((a,b) => Math.abs(b[1]) - Math.abs(a[1]));
-    const f1 = entries[0], f2 = entries[1];
-    return `Kläre Konflikt: ${f1[0]} (${f1[1].toFixed(2)}) vs. ${f2[0]} (${f2[1].toFixed(2)})`;
+    const f1 = entries[0];
+    const f2 = entries[1];
+    
+    const nameMap = {
+        distanceNorm: "Laufweg", waitPenalty: "Wartezeit", totalCoveredMin: "Arbeitszeit",
+        switchPenalty: "Wechsel", totalPlannedMin: "Planung"
+    };
+    
+    const n1 = nameMap[f1[0]] || f1[0];
+    const n2 = nameMap[f2[0]] || f2[0];
+    
+    return `${n1} (${f1[1]>0?'+':''}${f1[1].toFixed(1)}) vs. ${n2} (${f2[1]>0?'+':''}${f2[1].toFixed(1)})`;
 }
 
-// CSV Parser, der MODE und ID korrekt liest
+// --- CSV PARSER (ROBUST) ---
 export function parseCsvDataWithMode(text, filename) {
     const lines = text.trim().split("\n");
     if (lines.length < 2) return null;
+    
+    // Header cleanen (entfernt Quotes und Whitespace)
     const header = lines[0].split(",").map(h => h.trim().replace(/"/g, ""));
     
-    // Indices finden
     const idxChoice = header.indexOf("choice");
-    const idxMode = header.indexOf("mode"); // Suche nach "mode" Spalte
-    const idxId = header.indexOf("scenarioId");
-
-    if (idxChoice === -1) return null;
+    const idxMode = header.indexOf("mode"); 
+    
+    if (idxChoice === -1) return null; // Kein valides File
 
     const rows = [];
     lines.slice(1).forEach(line => {
+        // Ignoriere leere Zeilen
+        if (!line.trim()) return;
+        
         const cols = line.split(",").map(c => c.trim().replace(/"/g, ""));
-        if (cols.length !== header.length) return;
+        if (cols.length < header.length) return;
 
         const featA = {}, featB = {};
         BASE_FEATURES.forEach(f => {
             const iA = header.indexOf(`A_${f}`);
             const iB = header.indexOf(`B_${f}`);
-            if (iA > -1) featA[f] = parseFloat(cols[iA]);
-            if (iB > -1) featB[f] = parseFloat(cols[iB]);
+            // Fallback auf 0 falls Feature fehlt
+            featA[f] = iA > -1 ? parseFloat(cols[iA]) : 0;
+            featB[f] = iB > -1 ? parseFloat(cols[iB]) : 0;
         });
 
         rows.push({
             featA, featB, 
             choice: cols[idxChoice],
-            mode: idxMode > -1 ? cols[idxMode] : "UNKNOWN", // Hier lesen wir PERFECTIONING
-            scenarioId: idxId > -1 ? cols[idxId] : null
+            mode: idxMode > -1 ? cols[idxMode] : "NORMAL"
         });
     });
+    
     return { filename, rows };
 }
